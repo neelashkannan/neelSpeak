@@ -25,10 +25,17 @@ jobs:
         env:
           CONFIG: release
 
-      - name: Zip app bundle
+      - name: Build DMG
         run: |
-          cd "$GITHUB_WORKSPACE"
-          ditto -c -k --keepParent NeelSpeak.app NeelSpeak.zip
+          STAGING=$(mktemp -d)
+          cp -R NeelSpeak.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "NeelSpeak" \
+            -srcfolder "$STAGING" \
+            -ov -format UDZO \
+            -imagekey zlib-level=9 \
+            NeelSpeak.dmg
+          rm -rf "$STAGING"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -37,14 +44,16 @@ jobs:
           body: |
             ## NeelSpeak ${{ github.ref_name }}
 
-            ### Download
-            Download **NeelSpeak.zip** below, unzip, and move `NeelSpeak.app` to your `/Applications` folder.
-
-            **First launch:** Right-click → Open to bypass Gatekeeper.
+            ### Install
+            1. Download **NeelSpeak.dmg** below
+            2. Open the DMG — drag `NeelSpeak.app` into the **Applications** shortcut
+            3. Eject the DMG
+            4. **First launch:** Right-click → Open to bypass Gatekeeper
+            5. Grant **Microphone** and **Accessibility** permissions when prompted
 
             ### Requirements
             - macOS 14.0 (Sonoma) or later
             - Apple Silicon (M1 or later)
-          files: NeelSpeak.zip
+          files: NeelSpeak.dmg
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

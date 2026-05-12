@@ -4,5 +4,6 @@ build/
 VoiceTyper.app/
 NeelSpeak.app/
 NeelSpeak.zip
+NeelSpeak.dmg
 *.xcodeproj/
 .DS_Store
