@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-and-release:
     name: Build & Release
-    runs-on: macos-14   # Apple Silicon runner
+    runs-on: macos-15   # Xcode 16 / Swift 6 + Apple Silicon
 
     steps:
       - name: Checkout
