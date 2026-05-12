@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release
+    runs-on: macos-14   # Apple Silicon runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build NeelSpeak.app
+        run: bash Scripts/build-app.sh
+        env:
+          CONFIG: release
+
+      - name: Zip app bundle
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          ditto -c -k --keepParent NeelSpeak.app NeelSpeak.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NeelSpeak ${{ github.ref_name }}
+          body: |
+            ## NeelSpeak ${{ github.ref_name }}
+
+            ### Download
+            Download **NeelSpeak.zip** below, unzip, and move `NeelSpeak.app` to your `/Applications` folder.
+
+            **First launch:** Right-click → Open to bypass Gatekeeper.
+
+            ### Requirements
+            - macOS 14.0 (Sonoma) or later
+            - Apple Silicon (M1 or later)
+          files: NeelSpeak.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+build/
+VoiceTyper.app/
+NeelSpeak.app/
+NeelSpeak.zip
+*.xcodeproj/
+.DS_Store
