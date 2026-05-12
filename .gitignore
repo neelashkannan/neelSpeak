@@ -7,3 +7,6 @@ NeelSpeak.zip
 NeelSpeak.dmg
 *.xcodeproj/
 .DS_Store
+
+.vscode/
+copilot-instructions.md
