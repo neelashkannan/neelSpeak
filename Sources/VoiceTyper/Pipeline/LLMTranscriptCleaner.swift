@@ -199,16 +199,17 @@ actor LLMTranscriptCleaner {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             do {
-                let session = LanguageModelSession(instructions: { mode.systemPrompt })
-                // Cap output to ~1.5x the input length (cleanup should never grow text).
-                // Shorter caps = faster generation cutoff if model rambles.
-                let maxTokens = max(32, min(256, (text.count / 3) + 32))
+                let instructions = "You are a transcript editor. You return only the cleaned transcript with no preface, no commentary, no quotes."
+                let session = LanguageModelSession(instructions: { instructions })
+
+                let prompt = Self.foundationModelsPrompt(for: text, mode: mode)
+                let maxTokens = max(32, min(192, text.count / 3 + 32))
                 let options = GenerationOptions(
                     sampling: .greedy,
                     temperature: 0.0,
                     maximumResponseTokens: maxTokens
                 )
-                let response = try await session.respond(to: text, options: options)
+                let response = try await session.respond(to: prompt, options: options)
                 let output = sanitizeOutput(response.content, original: text)
                 return output.isEmpty ? nil : output
             } catch {
@@ -218,6 +219,64 @@ actor LLMTranscriptCleaner {
         }
         #endif
         return nil
+    }
+
+    private static func foundationModelsPrompt(for text: String, mode: CleanupMode) -> String {
+        switch mode {
+        case .off:
+            return text
+        case .conservative:
+            return """
+            TASK: Delete fillers and disfluencies from the transcript below. Keep everything else exactly. Output the cleaned transcript only.
+
+            DELETE these words/phrases anywhere they appear (case-insensitive): "um", "umm", "uh", "uhh", "uhm", "uh oh", "er", "erm", "ah", "well" (when used as a hesitation), "like" (when used as a filler), "you know", "I mean", "sort of", "kind of".
+
+            DELETE these patterns:
+            - Stutters: "I-I", "th-the", "wa-wait"
+            - Exact word repetitions: "the the cat" → "the cat"
+            - Course corrections: keep only the corrected phrase. Example: "go to the store, I mean the market" → "go to the market"
+
+            KEEP all other words exactly as written. Apply capitalization and end-of-sentence punctuation. Do not paraphrase. Do not add new content.
+
+            EXAMPLE 1
+            Transcript: um so like i went to the the store yesterday you know
+            Cleaned: I went to the store yesterday.
+
+            EXAMPLE 2
+            Transcript: send the email to John uh I mean to Sarah by Friday
+            Cleaned: Send the email to Sarah by Friday.
+
+            EXAMPLE 3
+            Transcript: hi i am recording uh oh well uh i am just testing this
+            Cleaned: Hi, I am recording. I am just testing this.
+
+            Transcript: \(text)
+            Cleaned:
+            """
+        case .aggressive:
+            return """
+            TASK: Clean and lightly edit the transcript below. Output the cleaned transcript only.
+
+            DELETE fillers: "um", "uh", "er", "ah", "well", "like", "you know", "I mean", "sort of", "kind of", "uh oh".
+            DELETE stutters and exact repetitions.
+            RESOLVE course corrections (keep only the corrected phrase).
+            TIGHTEN run-on sentences with sensible punctuation.
+            FIX obvious grammar slips that come from spoken word order.
+
+            Do not invent information. Do not add commentary. Preserve the speaker's voice.
+
+            EXAMPLE 1
+            Transcript: so I went to the store um and I was gonna get milk but like I forgot my wallet so I had to go back home
+            Cleaned: I went to the store to get milk, but I forgot my wallet, so I had to go back home.
+
+            EXAMPLE 2
+            Transcript: the the meeting it's at three I think yeah three o'clock tomorrow
+            Cleaned: The meeting is at three o'clock tomorrow.
+
+            Transcript: \(text)
+            Cleaned:
+            """
+        }
     }
 
     private func cleanWithGemma(_ text: String, mode: CleanupMode) async -> String? {
