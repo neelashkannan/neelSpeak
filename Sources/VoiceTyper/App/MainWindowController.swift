@@ -10,8 +10,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         window.title = "NeelSpeak"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.minSize = NSSize(width: 760, height: 560)
-        window.setContentSize(NSSize(width: 860, height: 640))
+        window.minSize = NSSize(width: 720, height: 520)
+        window.setContentSize(NSSize(width: 820, height: 600))
         window.center()
 
         super.init(window: window)

@@ -12,7 +12,7 @@ struct VoiceTyperDashboard: View {
                 ControlCenterView(viewModel: viewModel)
             }
         }
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: 720, minHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { viewModel.refreshPermissions() }
     }
@@ -228,65 +228,136 @@ private struct ControlCenterView: View {
     @ObservedObject var viewModel: VoiceTyperViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack {
-                HStack(spacing: 12) {
-                    AppIconMark()
-                        .frame(width: 46, height: 46)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("NeelSpeak")
-                            .font(.system(size: 28, weight: .bold))
-                        Text("Hold Option to dictate.")
-                            .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    HStack(spacing: 12) {
+                        AppIconMark()
+                            .frame(width: 42, height: 42)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("NeelSpeak")
+                                .font(.system(size: 26, weight: .bold))
+                            Text("Menu-bar voice typing. Hold Option anywhere to dictate.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    Spacer()
+                    StatusBadge(state: viewModel.state)
                 }
-                Spacer()
-                StatusBadge(state: viewModel.state)
-            }
 
-            HStack(alignment: .top, spacing: 18) {
-                DictationCard(viewModel: viewModel)
-                    .frame(maxWidth: .infinity, minHeight: 330)
-                RuntimeCard(viewModel: viewModel)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ShortcutCard(viewModel: viewModel)
+                        CleanupCard(viewModel: viewModel)
+                        TranscriptPanel(entries: viewModel.recentTranscripts)
+                            .frame(minHeight: 118)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    VStack(alignment: .leading, spacing: 16) {
+                        RuntimeCard(viewModel: viewModel)
+                        OverlayThemePicker(store: viewModel.themeStore)
+                    }
                     .frame(width: 260)
-                    .frame(minHeight: 330)
+                }
             }
-
-            CleanupCard(viewModel: viewModel)
-
-            OverlayThemePicker(store: viewModel.themeStore)
-
-            TranscriptPanel(entries: viewModel.recentTranscripts)
-                .frame(minHeight: 126)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(28)
     }
 }
 
 private struct OverlayThemePicker: View {
     @ObservedObject var store: OverlayThemeStore
 
-    private let columns = [GridItem(.adaptive(minimum: 132), spacing: 10)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Pill appearance", systemImage: "paintpalette.fill")
-                    .font(.system(size: 16, weight: .bold))
-                Spacer()
-                Text(store.theme.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            Label("Pill appearance", systemImage: "paintpalette.fill")
+                .font(.system(size: 16, weight: .bold))
+
+            HStack(spacing: 10) {
+                OverlayThemePreview(theme: store.theme)
+                    .frame(width: 74, height: 30)
+
+                Picker("Pill color", selection: $store.selectedID) {
+                    ForEach(OverlayThemeCatalog.all) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
             }
 
-            LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(OverlayThemeCatalog.all) { theme in
-                    OverlayThemeSwatch(
-                        theme: theme,
-                        selected: store.selectedID == theme.id,
-                        action: { store.selectedID = theme.id }
+            Text("Changes only the floating pill shown while you dictate.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .cardBackground()
+    }
+}
+
+private struct OverlayThemePreview: View {
+    let theme: OverlayTheme
+
+    var body: some View {
+        Capsule()
+            .fill(theme.fill)
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        AngularGradient(
+                            colors: theme.borderColors + [theme.borderColors.first ?? .white],
+                            center: .center
+                        ),
+                        lineWidth: 2
                     )
+            )
+    }
+}
+
+private struct ShortcutCard: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Global shortcut", systemImage: "keyboard")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("Hold Option anywhere")
+                        .font(.system(size: 26, weight: .bold))
+
+                    Text("NeelSpeak stays out of the way and types into the app you are already using.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(viewModel.state.title)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(viewModel.state.accentColor)
+                    Text(viewModel.state.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: 190, alignment: .trailing)
+            }
+
+            HStack(spacing: 8) {
+                ShortcutStep(title: "Hold", value: "Option", symbol: "option")
+                ShortcutStep(title: "Speak", value: "Anywhere", symbol: "text.bubble")
+                ShortcutStep(title: "Release", value: "Types text", symbol: "text.cursor")
             }
         }
         .padding(18)
@@ -294,77 +365,28 @@ private struct OverlayThemePicker: View {
     }
 }
 
-private struct OverlayThemeSwatch: View {
-    let theme: OverlayTheme
-    let selected: Bool
-    let action: () -> Void
+private struct ShortcutStep: View {
+    let title: String
+    let value: String
+    let symbol: String
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack {
-                    Capsule()
-                        .fill(theme.fill)
-                    Capsule()
-                        .strokeBorder(
-                            AngularGradient(
-                                colors: theme.borderColors + [theme.borderColors.first ?? .white],
-                                center: .center
-                            ),
-                            lineWidth: 2
-                        )
-                }
-                .frame(height: 30)
-
-                Text(theme.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 18)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 16, weight: .bold))
+                Text(value)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(selected ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.4)
-            )
         }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct DictationCard: View {
-    @ObservedObject var viewModel: VoiceTyperViewModel
-    @State private var isHolding = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label("Dictation", systemImage: "keyboard")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Text(viewModel.state.title)
-                .font(.system(size: 30, weight: .bold))
-
-            Text(viewModel.state.detail)
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                RecordButton(viewModel: viewModel, isHolding: $isHolding)
-                Spacer()
-            }
-
-            Spacer()
-        }
-        .padding(22)
-        .cardBackground()
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -373,14 +395,11 @@ private struct RuntimeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Status")
+            Text("System status")
                 .font(.system(size: 20, weight: .bold))
 
-            CompactInfoRow(title: "Microphone", value: viewModel.microphoneLabel, icon: "mic.fill", good: viewModel.microphoneStatus == .authorized)
             CompactInfoRow(title: "Accessibility", value: viewModel.accessibilityLabel, icon: "command", good: viewModel.accessibilityTrusted)
             CompactInfoRow(title: "Model", value: viewModel.selectedModel.displayName, icon: "cpu", good: viewModel.modelReady)
-
-            Spacer()
 
             Button {
                 viewModel.finishSetupAndRunInBackground()
@@ -392,50 +411,6 @@ private struct RuntimeCard: View {
         }
         .padding(18)
         .cardBackground()
-    }
-}
-
-private struct RecordButton: View {
-    @ObservedObject var viewModel: VoiceTyperViewModel
-    @Binding var isHolding: Bool
-
-    private var disabled: Bool {
-        !viewModel.canStartRecording && !viewModel.isRecording
-    }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(viewModel.state.accentColor.opacity(0.12))
-                .frame(width: 162, height: 162)
-
-            Circle()
-                .fill(viewModel.state.accentColor)
-                .frame(width: 118, height: 118)
-                .shadow(color: viewModel.state.accentColor.opacity(0.24), radius: 14, x: 0, y: 8)
-
-            VStack(spacing: 8) {
-                Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 34, weight: .bold))
-                Text(viewModel.isRecording ? "Release" : "Hold")
-                    .font(.system(size: 14, weight: .bold))
-            }
-            .foregroundStyle(.white)
-        }
-        .opacity(disabled ? 0.45 : 1)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !disabled, !isHolding else { return }
-                    isHolding = true
-                    viewModel.beginDictation()
-                }
-                .onEnded { _ in
-                    guard isHolding else { return }
-                    isHolding = false
-                    viewModel.endDictation()
-                }
-        )
     }
 }
 
