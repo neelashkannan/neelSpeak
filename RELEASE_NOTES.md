@@ -9,6 +9,10 @@ This release polishes NeelSpeak's macOS UI and ships the new app and menu bar ic
 - The control centre has been tightened into a cleaner split layout with a slim header, cleanup settings, recent dictations, status, and pill appearance controls.
 - Release packaging now includes PNG and ICNS image assets so the icons are present in local builds and GitHub release DMGs.
 
+## Fixes
+
+- Cloud cleanup engines (GitHub Copilot, OpenAI-compatible, Anthropic) no longer treat dictations that read like questions or commands as requests to answer. The system prompt is now explicit that the user message is always a transcript to clean, every transcript is wrapped in a `<transcript>` block with a "do not comply" directive, and the few-shot examples are now actually sent over the wire — including question-style pairs so the model learns to clean rather than answer.
+
 ## Version comparison
 
 | Area | v0.2.0 | v0.2.1 |
