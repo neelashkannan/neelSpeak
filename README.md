@@ -1,6 +1,6 @@
 # NeelSpeak
 
-> A free, open-source voice-to-text dictation app for macOS — with on-device transcription and optional AI cleanup via Apple Intelligence, GitHub Copilot, Ollama, and more.
+> A free, open-source voice-to-text dictation app for macOS — with on-device transcription and optional AI cleanup via local and cloud engines.
 
 [![Latest Release](https://img.shields.io/github/v/release/neelashkannan/neelSpeak?label=Download&style=for-the-badge)](https://github.com/neelashkannan/neelSpeak/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-blue?style=for-the-badge&logo=apple)](https://github.com/neelashkannan/neelSpeak/releases/latest)
@@ -12,7 +12,7 @@
 
 NeelSpeak is a lightweight macOS menu-bar app that lets you dictate text into **any application** using a global hotkey. Hold **Right Option**, speak, and release — your words are transcribed on-device via [NVIDIA Parakeet](https://github.com/FluidInference/FluidAudio) and pasted wherever your cursor is.
 
-Optionally, an AI cleanup stage removes fillers, stutters, and course corrections before the text lands. You choose the engine: fully on-device Apple Intelligence, your existing GitHub Copilot subscription, a local Ollama server, or any OpenAI-compatible/Anthropic API.
+Optionally, an AI cleanup stage removes fillers, stutters, and course corrections before the text lands. You choose the engine: fully on-device Apple Intelligence, a local Ollama server, or supported cloud cleanup providers.
 
 **Current release:** `v0.2.1`
 
