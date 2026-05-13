@@ -3,11 +3,27 @@
 ## What this is
 NeelSpeak is a macOS menu-bar voice-typing app. Hold **Option** anywhere to dictate; it transcribes via NVIDIA Parakeet (FluidAudio, on-device) and types into the active app via simulated Cmd+V. An optional local-AI cleanup stage strips fillers, stutters, and course corrections.
 
+## ⚠️ Build requirements
+
+**Full Xcode is required** (not just Command Line Tools) because the Gemma cleanup engine depends on `mlx-swift`, whose Metal shaders only compile under `xcodebuild`. Without Xcode:
+- `swift build` produces a binary that loads, but the moment any MLX code is called the process aborts with `Failed to load the default metallib` (uncatchable C++ exception).
+- The Apple Foundation Models cleanup engine still works without Xcode.
+
+Verify Xcode is set up correctly:
+```bash
+xcode-select -p              # must end with /Xcode.app/Contents/Developer
+xcrun --find metal           # must print a path
+xcrun --find metallib        # must print a path
+```
+If `xcode-select -p` shows `/Library/Developer/CommandLineTools`, run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` after installing Xcode.
+
+`Scripts/build-app.sh` auto-detects Xcode: it uses `xcodebuild` when available (Gemma works) and falls back to `swift build` with a warning otherwise (Gemma will crash).
+
 ## Key commands
 
 ### Build & run
 ```bash
-# Quick debug build (for compilation checks)
+# Quick syntax check (won't ship Metal shaders even with Xcode)
 swift build
 
 # Full redeploy — kills, wipes prefs/permissions, builds release, installs, launches
@@ -23,6 +39,9 @@ open /Applications/NeelSpeak.app
 
 # Watch runtime logs (cleanup, download, latency)
 log stream --predicate 'subsystem == "com.neelspeak.app"' --info
+
+# Run from terminal with stdout/stderr visible (debugging crashes)
+/Applications/NeelSpeak.app/Contents/MacOS/NeelSpeak
 ```
 
 ### When to use full vs soft redeploy
@@ -60,7 +79,9 @@ main.swift
 | Engine | Availability | Download |
 |--------|-------------|---------|
 | Apple Intelligence (default) | macOS 26+, Apple Intelligence enabled | None — on-device model built into OS |
-| Gemma 3 4B (4-bit MLX) | macOS 14+, Apple Silicon | ~2.4 GB, stored in `~/Library/Application Support/NeelSpeak/Models/MLX/` |
+| Gemma 3 1B (4-bit MLX) | macOS 14+, Apple Silicon | ~720 MB, stored in `~/Library/Application Support/NeelSpeak/Models/MLX/` |
+
+**Note:** Gemma 3 1B is used (not 4B) because the 4B variant on `mlx-community/gemma-3-4b-it-4bit` is the multimodal (vision + text) build, and mlx-swift-examples 2.29.1's text-only loader rejects it with a `mismatchedSize` on `embed_tokens.weight`. The 1B model is text-only and loads cleanly; it is also faster and lighter, which suits the filler-removal use case.
 
 ### Modes
 - **Off** — passthrough, no LLM called
@@ -78,7 +99,7 @@ Only Parakeet is active. WhisperKit was removed due to a `swift-transformers` ve
 | Model | Runtime | Location |
 |-------|---------|---------|
 | NVIDIA Parakeet TDT v3 | FluidAudio | `~/Library/Application Support/NeelSpeak/Models/FluidAudio/parakeet-tdt-0.6b-v3/` |
-| Gemma 3 4B-it 4-bit | MLX (mlx-swift-examples 2.29.1) | `~/Library/Application Support/NeelSpeak/Models/MLX/models/mlx-community/gemma-3-4b-it-4bit/` |
+| Gemma 3 1B-it 4-bit | MLX (mlx-swift-examples 2.29.1) | `~/Library/Application Support/NeelSpeak/Models/MLX/models/mlx-community/gemma-3-1b-it-4bit/` |
 
 ## Dependencies
 ```

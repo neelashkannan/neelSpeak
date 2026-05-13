@@ -20,13 +20,14 @@ actor LLMTranscriptCleaner {
         case failed(String)
     }
 
-    static let gemmaModelID = "mlx-community/gemma-3-4b-it-4bit"
-    static let gemmaFolderName = "gemma-3-4b-it-4bit"
+    static let gemmaModelID = "mlx-community/gemma-3-1b-it-4bit"
+    static let gemmaFolderName = "gemma-3-1b-it-4bit"
     static let gemmaStoragePath = "\(NSHomeDirectory())/Library/Application Support/NeelSpeak/Models/MLX"
 
     private(set) var engine: CleanupEngine = .foundationModels
     private(set) var state: LoadState = .unloaded
     private var gemmaContainer: ModelContainer?
+    private var foundationModelsPrewarmed = false
 
     func currentState() -> LoadState { state }
     func currentEngine() -> CleanupEngine { engine }
@@ -36,6 +37,17 @@ actor LLMTranscriptCleaner {
         engine = newEngine
         gemmaContainer = nil
         state = .unloaded
+    }
+
+    static func mlxMetallibAvailable() -> Bool {
+        let fm = FileManager.default
+        let candidates = [
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/mlx.metallib"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/mlx.metallib")
+        ]
+        return candidates.contains { fm.fileExists(atPath: $0.path) }
     }
 
     func gemmaInstalled() -> Bool {
@@ -71,6 +83,13 @@ actor LLMTranscriptCleaner {
             case .available:
                 cleanerLog.info("FoundationModels available, marking ready")
                 state = .ready
+                // Pre-warm the model so the first dictation doesn't pay cold-start cost.
+                if !foundationModelsPrewarmed {
+                    let warmupSession = LanguageModelSession(instructions: { "You clean speech-to-text transcripts." })
+                    warmupSession.prewarm()
+                    foundationModelsPrewarmed = true
+                    cleanerLog.info("FoundationModels prewarmed")
+                }
             case .unavailable(let reason):
                 cleanerLog.error("FoundationModels unavailable: \(String(describing: reason))")
                 state = .unsupported("Apple Intelligence unavailable: \(String(describing: reason))")
@@ -83,6 +102,11 @@ actor LLMTranscriptCleaner {
     }
 
     private func prepareGemma(progress: @escaping @Sendable (Double) -> Void) async {
+        guard Self.mlxMetallibAvailable() else {
+            cleanerLog.error("prepareGemma: MLX metallib not bundled — Xcode build required")
+            state = .unsupported("Gemma needs the app to be built with full Xcode. Install Xcode and run Scripts/redeploy-app.sh.")
+            return
+        }
         cleanerLog.info("prepareGemma: starting download/load")
         state = .downloading(0)
         progress(0)
@@ -94,7 +118,10 @@ actor LLMTranscriptCleaner {
             )
 
             let hub = HubApi(downloadBase: URL(fileURLWithPath: Self.gemmaStoragePath))
-            let configuration = ModelConfiguration(id: Self.gemmaModelID)
+            let configuration = ModelConfiguration(
+                id: Self.gemmaModelID,
+                extraEOSTokens: ["<end_of_turn>", "<eos>"]
+            )
 
             let loaded = try await LLMModelFactory.shared.loadContainer(
                 hub: hub,
@@ -129,6 +156,13 @@ actor LLMTranscriptCleaner {
             return text
         }
 
+        // Fast path: if conservative mode and the transcript shows no disfluencies,
+        // skip the LLM call entirely. Saves 0.5-2s per dictation on clean speech.
+        if mode == .conservative && Self.looksClean(trimmed) {
+            cleanerLog.info("clean: fast-path bypass (no disfluencies detected)")
+            return trimmed
+        }
+
         let started = Date()
         let result: String
         switch engine {
@@ -142,16 +176,43 @@ actor LLMTranscriptCleaner {
         return result
     }
 
+    /// Returns true if the text shows no obvious markers Conservative mode would clean.
+    /// Used to skip the LLM entirely for already-clean speech (most short utterances).
+    private static func looksClean(_ text: String) -> Bool {
+        let patterns = [
+            // Filler words / phrases (case-insensitive, whole-word)
+            #"(?i)\b(?:um+|uh+|er+|erm|ah+|like|you know|sort of|kind of|i mean)\b"#,
+            // Stutters: "I-I", "th-the"
+            #"(?i)\b(\w{1,3})-\1?\w*\b"#,
+            // Exact word repetitions: "the the cat"
+            #"(?i)\b(\w+)\s+\1\b"#
+        ]
+        for p in patterns {
+            if text.range(of: p, options: .regularExpression) != nil {
+                return false
+            }
+        }
+        return true
+    }
+
     private func cleanWithFoundationModels(_ text: String, mode: CleanupMode) async -> String? {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             do {
                 let session = LanguageModelSession(instructions: { mode.systemPrompt })
-                let options = GenerationOptions(temperature: 0.2)
+                // Cap output to ~1.5x the input length (cleanup should never grow text).
+                // Shorter caps = faster generation cutoff if model rambles.
+                let maxTokens = max(32, min(256, (text.count / 3) + 32))
+                let options = GenerationOptions(
+                    sampling: .greedy,
+                    temperature: 0.0,
+                    maximumResponseTokens: maxTokens
+                )
                 let response = try await session.respond(to: text, options: options)
                 let output = sanitizeOutput(response.content, original: text)
                 return output.isEmpty ? nil : output
             } catch {
+                cleanerLog.error("cleanWithFoundationModels failed: \(String(describing: error))")
                 return nil
             }
         }
@@ -162,15 +223,20 @@ actor LLMTranscriptCleaner {
     private func cleanWithGemma(_ text: String, mode: CleanupMode) async -> String? {
         guard let container = gemmaContainer else { return nil }
         do {
-            let userInput = UserInput(messages: [
-                ["role": "system", "content": mode.systemPrompt],
-                ["role": "user", "content": text]
-            ])
+            var messages: [[String: String]] = [
+                ["role": "system", "content": mode.systemPrompt]
+            ]
+            for (input, output) in mode.fewShotExamples {
+                messages.append(["role": "user", "content": input])
+                messages.append(["role": "assistant", "content": output])
+            }
+            messages.append(["role": "user", "content": text])
 
+            let userInput = UserInput(messages: messages)
             let maxTokens = estimatedMaxOutputTokens(for: text)
             let result = try await container.perform { context in
                 let lmInput = try await context.processor.prepare(input: userInput)
-                let parameters = GenerateParameters(temperature: 0.2)
+                let parameters = GenerateParameters(temperature: 0.1)
                 return try MLXLMCommon.generate(
                     input: lmInput,
                     parameters: parameters,
@@ -193,7 +259,28 @@ actor LLMTranscriptCleaner {
     }
 
     private func sanitizeOutput(_ raw: String, original: String) -> String {
-        var output = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var output = raw
+
+        // Strip chat-template control tokens that sometimes leak into decoded text.
+        let stripTokens = [
+            "<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>",
+            "<|im_end|>", "<|im_start|>", "<|end|>", "<|start|>",
+            "<|user|>", "<|assistant|>", "<|system|>"
+        ]
+        for token in stripTokens {
+            output = output.replacingOccurrences(of: token, with: "")
+        }
+
+        // Cut off at any role marker the model might emit when it tries to start
+        // a new turn (defensive — chat template usually prevents this).
+        for marker in ["\nuser:", "\nassistant:", "\nUser:", "\nAssistant:"] {
+            if let range = output.range(of: marker) {
+                output = String(output[..<range.lowerBound])
+            }
+        }
+
+        output = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
         if output.hasPrefix("\"") && output.hasSuffix("\"") && output.count >= 2 {
             output = String(output.dropFirst().dropLast())
         }
