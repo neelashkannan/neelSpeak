@@ -63,6 +63,8 @@ final class StatusBarController: NSObject {
             statusMenuItem.title = "Listening…"
         case .transcribing:
             statusMenuItem.title = "Transcribing…"
+        case .cleaning:
+            statusMenuItem.title = "Cleaning up…"
         case .error(let msg):
             statusMenuItem.title = "Error: \(msg.prefix(60))"
         }

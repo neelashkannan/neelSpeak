@@ -46,6 +46,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.onHideWindow = { [weak self] in
             self?.mainWindow.hide()
         }
+        viewModel.onPrepareCleanupModel = { [weak self] in
+            self?.coordinator.prepareCleanupModel()
+        }
+        coordinator.onCleanupState = { [weak self] state in
+            self?.viewModel.updateCleanupState(state)
+        }
+        if viewModel.cleanupMode != .off {
+            coordinator.prepareCleanupModel()
+        }
 
         statusBar.update(state: .setupRequired)
         coordinator.startHotkeyMonitoring()

@@ -15,6 +15,8 @@ extension DictationCoordinator.State {
             return "Listening"
         case .transcribing:
             return "Transcribing"
+        case .cleaning:
+            return "Cleaning up"
         case .error:
             return "Needs attention"
         }
@@ -34,6 +36,8 @@ extension DictationCoordinator.State {
             return "Speak naturally. Release to insert the text into the active app."
         case .transcribing:
             return "Converting speech to text and preparing to paste."
+        case .cleaning:
+            return "Local AI is removing fillers, stutters, and course corrections."
         case .error(let message):
             return message
         }
@@ -53,6 +57,8 @@ extension DictationCoordinator.State {
             return "waveform"
         case .transcribing:
             return "text.bubble.fill"
+        case .cleaning:
+            return "wand.and.stars"
         case .error:
             return "exclamationmark.triangle.fill"
         }

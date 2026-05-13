@@ -10,17 +10,21 @@ final class DictationCoordinator {
         case idle
         case recording
         case transcribing
+        case cleaning
         case error(String)
     }
 
     var onStateChange: ((State) -> Void)?
     var onTranscript: ((String) -> Void)?
     var onHotkeyEvent: ((HotkeyManager.Event) -> Void)?
+    var onCleanupState: ((LLMTranscriptCleaner.LoadState) -> Void)?
 
     private let audio = AudioEngine()
     private let hotkey = HotkeyManager()
     private let whisper = WhisperService()
+    private let cleaner = LLMTranscriptCleaner()
     private var hotkeyStarted = false
+    var cleanupMode: CleanupMode = .off
 
     private(set) var state: State = .setupRequired {
         didSet { onStateChange?(state) }
@@ -114,13 +118,64 @@ final class DictationCoordinator {
 
         Task { [weak self] in
             guard let self else { return }
-            let text = TranscriptCorrector.correct(await self.whisper.transcribe(samples: samples))
+            let raw = await self.whisper.transcribe(samples: samples)
+            let corrected = TranscriptCorrector.correct(raw)
+            let mode = self.cleanupMode
+            let cleaned: String
+            if mode == .off || corrected.isEmpty {
+                cleaned = corrected
+            } else {
+                await MainActor.run { self.state = .cleaning }
+                cleaned = await self.cleaner.clean(corrected, mode: mode)
+            }
             await MainActor.run {
-                if !text.isEmpty {
-                    self.onTranscript?(text)
-                    TextInjector.inject(text)
+                if !cleaned.isEmpty {
+                    self.onTranscript?(cleaned)
+                    TextInjector.inject(cleaned)
                 }
                 self.state = .idle
+            }
+        }
+    }
+
+    func setCleanupMode(_ mode: CleanupMode) {
+        cleanupMode = mode
+    }
+
+    func setCleanupEngine(_ engine: CleanupEngine) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.cleaner.setEngine(engine)
+            await MainActor.run {
+                self.onCleanupState?(.unloaded)
+            }
+        }
+    }
+
+    func prepareCleanupModel() {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.cleaner.prepare { progress in
+                Task { @MainActor in
+                    self.onCleanupState?(.downloading(progress))
+                }
+            }
+            let s = await self.cleaner.currentState()
+            await MainActor.run {
+                self.onCleanupState?(s)
+            }
+        }
+    }
+
+    func cleanupGemmaInstalled() async -> Bool {
+        await cleaner.gemmaInstalled()
+    }
+
+    func unloadCleanupModel() {
+        Task { [weak self] in
+            await self?.cleaner.unload()
+            await MainActor.run {
+                self?.onCleanupState?(.unloaded)
             }
         }
     }

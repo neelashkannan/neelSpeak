@@ -68,7 +68,7 @@ final class ListeningOverlayController {
             hotkeyPreviewActive = true
             if !viewModel.isVisible { viewModel.startedAt = Date() }
             show(mode: .listening)
-        case .transcribing:
+        case .transcribing, .cleaning:
             hotkeyPreviewActive = false
             show(mode: .transcribing)
         default:
@@ -110,7 +110,7 @@ final class ListeningOverlayController {
 
     private var currentStateKeepsOverlayVisible: Bool {
         switch currentState {
-        case .recording, .transcribing:
+        case .recording, .transcribing, .cleaning:
             return true
         default:
             return false

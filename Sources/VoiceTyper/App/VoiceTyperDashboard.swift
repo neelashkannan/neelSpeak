@@ -172,11 +172,6 @@ private struct ModelSetupSection: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(viewModel.modelReady)
-
-                    Button("Use Whisper Turbo") {
-                        viewModel.chooseCurrentBuildFallbackModel()
-                    }
-                    .controlSize(.large)
                 }
             }
         }
@@ -256,6 +251,8 @@ private struct ControlCenterView: View {
                     .frame(width: 260)
                     .frame(minHeight: 330)
             }
+
+            CleanupCard(viewModel: viewModel)
 
             OverlayThemePicker(store: viewModel.themeStore)
 
@@ -439,6 +436,101 @@ private struct RecordButton: View {
                     viewModel.endDictation()
                 }
         )
+    }
+}
+
+private struct CleanupCard: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Speech cleanup", systemImage: "wand.and.stars")
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                Text(viewModel.cleanupStatusLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("After each dictation, a local AI model strips fillers (um, uh, like), stutters, repetitions, and course corrections.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Mode")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Mode", selection: $viewModel.cleanupMode) {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if viewModel.cleanupMode != .off {
+                    Text(viewModel.cleanupMode.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Engine")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Engine", selection: $viewModel.cleanupEngine) {
+                    ForEach(CleanupEngine.allCases) { engine in
+                        Text(engine.displayName).tag(engine)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(viewModel.cleanupMode == .off)
+                Text(viewModel.cleanupEngine.subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let progress = viewModel.cleanupDownloadProgress {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                    Text("Downloading \(viewModel.cleanupEngine.displayName) \(Int(progress * 100))%")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if case .failed(let msg) = viewModel.cleanupState {
+                Label(msg.prefix(160).description, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if case .unsupported(let msg) = viewModel.cleanupState {
+                Label(msg, systemImage: "info.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Button {
+                    viewModel.loadCleanupModelNow()
+                } label: {
+                    Label(viewModel.cleanupActionLabel, systemImage: "arrow.down.circle.fill")
+                }
+                .disabled(!viewModel.cleanupCanLoad)
+                Spacer()
+            }
+        }
+        .padding(18)
+        .cardBackground()
     }
 }
 
@@ -717,6 +809,8 @@ private extension DictationCoordinator.State {
             return .red
         case .transcribing:
             return .indigo
+        case .cleaning:
+            return .purple
         case .error:
             return .orange
         }

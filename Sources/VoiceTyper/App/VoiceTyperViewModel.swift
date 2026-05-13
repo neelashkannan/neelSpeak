@@ -22,15 +22,38 @@ final class VoiceTyperViewModel: ObservableObject {
     }
     @Published private(set) var setupComplete: Bool
     @Published private(set) var setupMessage: String?
+    @Published var cleanupMode: CleanupMode {
+        didSet {
+            UserDefaults.standard.set(cleanupMode.rawValue, forKey: Self.cleanupModeKey)
+            coordinator.setCleanupMode(cleanupMode)
+            if cleanupMode != .off {
+                ensureCleanupModelReady()
+            }
+        }
+    }
+    @Published var cleanupEngine: CleanupEngine {
+        didSet {
+            UserDefaults.standard.set(cleanupEngine.rawValue, forKey: Self.cleanupEngineKey)
+            coordinator.setCleanupEngine(cleanupEngine)
+            cleanupState = .unloaded
+            if cleanupMode != .off {
+                ensureCleanupModelReady()
+            }
+        }
+    }
+    @Published private(set) var cleanupState: LLMTranscriptCleaner.LoadState = .unloaded
 
     var onRetrySetup: (() -> Void)?
     var onPrepareModel: ((SpeechModelOption) -> Void)?
     var onHideWindow: (() -> Void)?
+    var onPrepareCleanupModel: (() -> Void)?
 
     private let coordinator: DictationCoordinator
     let themeStore: OverlayThemeStore
     private static let selectedModelKey = "selectedModelID"
     private static let setupCompleteKey = "setupComplete"
+    private static let cleanupModeKey = "cleanupMode"
+    private static let cleanupEngineKey = "cleanupEngine"
 
     init(coordinator: DictationCoordinator, themeStore: OverlayThemeStore) {
         self.coordinator = coordinator
@@ -38,6 +61,76 @@ final class VoiceTyperViewModel: ObservableObject {
         selectedModelID = UserDefaults.standard.string(forKey: Self.selectedModelKey)
             ?? SpeechModelCatalog.defaultSelectionID
         setupComplete = UserDefaults.standard.bool(forKey: Self.setupCompleteKey)
+        let storedMode = UserDefaults.standard.string(forKey: Self.cleanupModeKey)
+            .flatMap(CleanupMode.init(rawValue:)) ?? .off
+        let storedEngine = UserDefaults.standard.string(forKey: Self.cleanupEngineKey)
+            .flatMap(CleanupEngine.init(rawValue:)) ?? .foundationModels
+        self.cleanupMode = storedMode
+        self.cleanupEngine = storedEngine
+        coordinator.setCleanupMode(storedMode)
+        coordinator.setCleanupEngine(storedEngine)
+    }
+
+    var cleanupReady: Bool {
+        if case .ready = cleanupState { return true }
+        return false
+    }
+
+    var cleanupDownloadProgress: Double? {
+        if case .downloading(let p) = cleanupState { return p }
+        return nil
+    }
+
+    var cleanupStatusLabel: String {
+        switch cleanupState {
+        case .unloaded:
+            return cleanupMode == .off ? "Off" : "Not loaded"
+        case .downloading(let p):
+            return "Downloading \(Int(p * 100))%"
+        case .loading:
+            return "Loading…"
+        case .ready:
+            return "Ready"
+        case .unsupported:
+            return "Unavailable"
+        case .failed(let msg):
+            return "Error: \(msg.prefix(80))"
+        }
+    }
+
+    var cleanupActionLabel: String {
+        switch cleanupEngine {
+        case .foundationModels:
+            return "Check Apple Intelligence"
+        case .gemma:
+            return "Download Gemma model"
+        }
+    }
+
+    var cleanupCanLoad: Bool {
+        switch cleanupState {
+        case .downloading, .loading, .ready:
+            return false
+        default:
+            return true
+        }
+    }
+
+    func loadCleanupModelNow() {
+        onPrepareCleanupModel?()
+    }
+
+    func updateCleanupState(_ state: LLMTranscriptCleaner.LoadState) {
+        cleanupState = state
+    }
+
+    func ensureCleanupModelReady() {
+        switch cleanupState {
+        case .ready, .downloading, .loading:
+            return
+        default:
+            onPrepareCleanupModel?()
+        }
     }
 
     var canStartRecording: Bool {
@@ -84,6 +177,7 @@ final class VoiceTyperViewModel: ObservableObject {
         if case .idle = state { return true }
         if case .recording = state { return true }
         if case .transcribing = state { return true }
+        if case .cleaning = state { return true }
         return false
     }
 

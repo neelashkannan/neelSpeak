@@ -17,7 +17,7 @@ struct SpeechModelOption: Identifiable, Equatable {
     var isSupportedInCurrentBuild: Bool {
         switch runtime {
         case .whisperKit:
-            return whisperVariant != nil
+            return false
         case .fluidAudioParakeet:
             return true
         }
@@ -76,13 +76,11 @@ enum SpeechModelCatalog {
     )
 
     static let all: [SpeechModelOption] = [
-        parakeet,
-        whisperTurbo,
-        whisperBase
+        parakeet
     ]
 
     static let defaultSelectionID = parakeet.id
-    static let currentBuildFallbackID = whisperTurbo.id
+    static let currentBuildFallbackID = parakeet.id
 
     static func option(id: String) -> SpeechModelOption {
         all.first { $0.id == id } ?? parakeet
