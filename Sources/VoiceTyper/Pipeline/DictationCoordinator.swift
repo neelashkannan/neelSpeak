@@ -152,23 +152,25 @@ final class DictationCoordinator {
         }
     }
 
+    func setCleanupCloudConfig(_ config: LLMTranscriptCleaner.CloudConfig) {
+        Task { [weak self] in
+            await self?.cleaner.setCloudConfig(config)
+        }
+    }
+
+    func fetchCopilotModels() async -> [String] {
+        await cleaner.fetchCopilotModels()
+    }
+
     func prepareCleanupModel() {
         Task { [weak self] in
             guard let self else { return }
-            await self.cleaner.prepare { progress in
-                Task { @MainActor in
-                    self.onCleanupState?(.downloading(progress))
-                }
-            }
+            await self.cleaner.prepare { _ in }
             let s = await self.cleaner.currentState()
             await MainActor.run {
                 self.onCleanupState?(s)
             }
         }
-    }
-
-    func cleanupGemmaInstalled() async -> Bool {
-        await cleaner.gemmaInstalled()
     }
 
     func unloadCleanupModel() {

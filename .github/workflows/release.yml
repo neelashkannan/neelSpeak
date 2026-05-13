@@ -41,19 +41,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: NeelSpeak ${{ github.ref_name }}
-          body: |
-            ## NeelSpeak ${{ github.ref_name }}
-
-            ### Install
-            1. Download **NeelSpeak.dmg** below
-            2. Open the DMG — drag `NeelSpeak.app` into the **Applications** shortcut
-            3. Eject the DMG
-            4. **First launch:** Right-click → Open to bypass Gatekeeper
-            5. Grant **Microphone** and **Accessibility** permissions when prompted
-
-            ### Requirements
-            - macOS 14.0 (Sonoma) or later
-            - Apple Silicon (M1 or later)
+          body_path: RELEASE_NOTES.md
           files: NeelSpeak.dmg
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

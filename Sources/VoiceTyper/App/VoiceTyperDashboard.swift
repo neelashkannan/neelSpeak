@@ -495,16 +495,6 @@ private struct CleanupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let progress = viewModel.cleanupDownloadProgress {
-                VStack(alignment: .leading, spacing: 6) {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                    Text("Downloading \(viewModel.cleanupEngine.displayName) \(Int(progress * 100))%")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             if case .failed(let msg) = viewModel.cleanupState {
                 Label(msg.prefix(160).description, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 12))
@@ -519,18 +509,279 @@ private struct CleanupCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
-                Button {
-                    viewModel.loadCleanupModelNow()
-                } label: {
-                    Label(viewModel.cleanupActionLabel, systemImage: "arrow.down.circle.fill")
+            switch viewModel.cleanupEngine {
+            case .openAICompatible:
+                OpenAICompatConfigView(viewModel: viewModel)
+            case .anthropic:
+                AnthropicConfigView(viewModel: viewModel)
+            case .githubCopilot:
+                CopilotConfigView(viewModel: viewModel)
+            case .foundationModels:
+                HStack {
+                    Button {
+                        viewModel.loadCleanupModelNow()
+                    } label: {
+                        Label(viewModel.cleanupActionLabel, systemImage: "arrow.down.circle.fill")
+                    }
+                    .disabled(!viewModel.cleanupCanLoad)
+                    Spacer()
                 }
-                .disabled(!viewModel.cleanupCanLoad)
-                Spacer()
             }
         }
         .padding(18)
         .cardBackground()
+    }
+}
+
+private struct OpenAICompatConfigView: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+    @State private var showKey = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Preset")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 70, alignment: .leading)
+                Menu {
+                    ForEach(OpenAICompatPreset.all) { preset in
+                        Button(preset.displayName) {
+                            viewModel.applyOpenAIPreset(preset)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(currentPresetName)
+                        Image(systemName: "chevron.down")
+                    }
+                    .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                Spacer()
+            }
+
+            labelledField("Base URL", text: $viewModel.cloudOpenAIBaseURL, placeholder: "https://api.openai.com/v1")
+            labelledField("Model", text: $viewModel.cloudOpenAIModel, placeholder: "gpt-4o-mini")
+            keyField("API Key", text: $viewModel.cloudOpenAIKey, hint: currentPresetHint)
+        }
+        .padding(.top, 4)
+    }
+
+    private var currentPresetName: String {
+        OpenAICompatPreset.all.first(where: { $0.baseURL == viewModel.cloudOpenAIBaseURL })?.displayName ?? "Custom"
+    }
+
+    private var currentPresetHint: String {
+        OpenAICompatPreset.all.first(where: { $0.baseURL == viewModel.cloudOpenAIBaseURL })?.apiKeyHint
+            ?? "API key for your provider"
+    }
+
+    @ViewBuilder
+    private func labelledField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+        }
+    }
+
+    @ViewBuilder
+    private func keyField(_ label: String, text: Binding<String>, hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 70, alignment: .leading)
+                if showKey {
+                    TextField("paste key here", text: text)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                } else {
+                    SecureField("paste key here", text: text)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                Button {
+                    showKey.toggle()
+                } label: {
+                    Image(systemName: showKey ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+            }
+            if !hint.isEmpty {
+                Text(hint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 78)
+            }
+        }
+    }
+}
+
+private struct CopilotConfigView: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let code = viewModel.copilotDeviceCode {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Open the GitHub page below and enter this code:")
+                        .font(.system(size: 12))
+                    Text(code.userCode)
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Button {
+                            if let url = URL(string: code.verificationURL) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Label("Open github.com/login/device", systemImage: "arrow.up.right.square")
+                        }
+                        Button("Cancel") {
+                            viewModel.signOutOfCopilot()
+                        }
+                    }
+                    Text("Waiting for you to authorize in the browser…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            } else if !viewModel.cloudCopilotOAuthToken.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Signed in to GitHub Copilot")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Button("Sign out") {
+                        viewModel.signOutOfCopilot()
+                    }
+                    .controlSize(.small)
+                }
+            } else {
+                Button {
+                    viewModel.startCopilotSignIn()
+                } label: {
+                    Label("Sign in with GitHub Copilot", systemImage: "person.crop.circle.badge.checkmark")
+                }
+                .disabled(viewModel.copilotAuthInProgress)
+            }
+
+            if !viewModel.cloudCopilotOAuthToken.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Model")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 70, alignment: .leading)
+                    if viewModel.copilotAvailableModels.isEmpty {
+                        if viewModel.copilotModelsLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Loading models…")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("No models loaded")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            viewModel.refreshCopilotModels()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(viewModel.copilotModelsLoading)
+                    } else {
+                        Picker("", selection: $viewModel.cloudCopilotModel) {
+                            ForEach(viewModel.copilotAvailableModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .font(.system(size: 12))
+                        Spacer()
+                        Button {
+                            viewModel.refreshCopilotModels()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(viewModel.copilotModelsLoading)
+                    }
+                }
+                if !viewModel.copilotAvailableModels.isEmpty {
+                    Text("\(viewModel.copilotAvailableModels.count) chat models available from your Copilot subscription")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 78)
+                }
+            }
+
+            if let err = viewModel.copilotAuthError {
+                Label(err.prefix(200).description, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+private struct AnthropicConfigView: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+    @State private var showKey = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Model")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 70, alignment: .leading)
+                TextField("claude-haiku-4-5", text: $viewModel.cloudAnthropicModel)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("API Key")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 70, alignment: .leading)
+                    if showKey {
+                        TextField("paste key here", text: $viewModel.cloudAnthropicKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                    } else {
+                        SecureField("paste key here", text: $viewModel.cloudAnthropicKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+                    Button {
+                        showKey.toggle()
+                    } label: {
+                        Image(systemName: showKey ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Text("sk-ant-... from console.anthropic.com")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 78)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 

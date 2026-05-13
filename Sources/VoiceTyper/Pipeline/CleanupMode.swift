@@ -2,23 +2,38 @@ import Foundation
 
 enum CleanupEngine: String, CaseIterable, Identifiable, Codable {
     case foundationModels
-    case gemma
+    case githubCopilot
+    case openAICompatible
+    case anthropic
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .foundationModels: return "Apple Intelligence"
-        case .gemma: return "Gemma 3 1B"
+        case .githubCopilot: return "GitHub Copilot"
+        case .openAICompatible: return "OpenAI-compatible"
+        case .anthropic: return "Anthropic Claude"
         }
     }
 
     var subtitle: String {
         switch self {
         case .foundationModels:
-            return "Built into macOS 26. Instant, no download."
-        case .gemma:
-            return "Local 4-bit MLX model. ~720 MB on first use."
+            return "Built into macOS 26. On-device. ~1-2s per cleanup."
+        case .githubCopilot:
+            return "Uses your GitHub Copilot subscription. OAuth sign-in. ~300ms."
+        case .openAICompatible:
+            return "OpenAI, GitHub Models, OpenRouter, Groq, Ollama, OpenCode. ~300ms. Sends text to provider."
+        case .anthropic:
+            return "Anthropic Claude direct. ~250ms. Sends text to Anthropic."
+        }
+    }
+
+    var isCloud: Bool {
+        switch self {
+        case .foundationModels: return false
+        case .githubCopilot, .openAICompatible, .anthropic: return true
         }
     }
 }

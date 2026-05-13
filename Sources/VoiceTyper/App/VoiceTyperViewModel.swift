@@ -43,6 +43,34 @@ final class VoiceTyperViewModel: ObservableObject {
     }
     @Published private(set) var cleanupState: LLMTranscriptCleaner.LoadState = .unloaded
 
+    @Published var cloudOpenAIBaseURL: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudOpenAIModel: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudOpenAIKey: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudAnthropicModel: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudAnthropicKey: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudCopilotModel: String {
+        didSet { saveCloudConfig() }
+    }
+    @Published var cloudCopilotOAuthToken: String {
+        didSet { saveCloudConfig() }
+    }
+
+    @Published var copilotDeviceCode: CopilotAuthService.DeviceCode?
+    @Published var copilotAuthError: String?
+    @Published var copilotAuthInProgress: Bool = false
+    @Published private(set) var copilotAvailableModels: [String] = []
+    @Published private(set) var copilotModelsLoading: Bool = false
+
     var onRetrySetup: (() -> Void)?
     var onPrepareModel: ((SpeechModelOption) -> Void)?
     var onHideWindow: (() -> Void)?
@@ -54,6 +82,13 @@ final class VoiceTyperViewModel: ObservableObject {
     private static let setupCompleteKey = "setupComplete"
     private static let cleanupModeKey = "cleanupMode"
     private static let cleanupEngineKey = "cleanupEngine"
+    private static let cloudOpenAIBaseURLKey = "cloudOpenAIBaseURL"
+    private static let cloudOpenAIModelKey = "cloudOpenAIModel"
+    private static let cloudOpenAIKeyKey = "cloudOpenAIKey"
+    private static let cloudAnthropicModelKey = "cloudAnthropicModel"
+    private static let cloudAnthropicKeyKey = "cloudAnthropicKey"
+    private static let cloudCopilotModelKey = "cloudCopilotModel"
+    private static let cloudCopilotOAuthTokenKey = "cloudCopilotOAuthToken"
 
     init(coordinator: DictationCoordinator, themeStore: OverlayThemeStore) {
         self.coordinator = coordinator
@@ -67,8 +102,110 @@ final class VoiceTyperViewModel: ObservableObject {
             .flatMap(CleanupEngine.init(rawValue:)) ?? .foundationModels
         self.cleanupMode = storedMode
         self.cleanupEngine = storedEngine
+
+        let d = UserDefaults.standard
+        self.cloudOpenAIBaseURL = d.string(forKey: Self.cloudOpenAIBaseURLKey) ?? OpenAICompatPreset.githubModels.baseURL
+        self.cloudOpenAIModel = d.string(forKey: Self.cloudOpenAIModelKey) ?? OpenAICompatPreset.githubModels.defaultModel
+        self.cloudOpenAIKey = d.string(forKey: Self.cloudOpenAIKeyKey) ?? ""
+        self.cloudAnthropicModel = d.string(forKey: Self.cloudAnthropicModelKey) ?? "claude-haiku-4-5"
+        self.cloudAnthropicKey = d.string(forKey: Self.cloudAnthropicKeyKey) ?? ""
+        self.cloudCopilotModel = d.string(forKey: Self.cloudCopilotModelKey) ?? "gpt-4o-mini"
+        self.cloudCopilotOAuthToken = d.string(forKey: Self.cloudCopilotOAuthTokenKey) ?? ""
+
         coordinator.setCleanupMode(storedMode)
         coordinator.setCleanupEngine(storedEngine)
+        pushCloudConfigToCoordinator()
+
+        // If we already have a Copilot OAuth token on disk, pre-fetch the
+        // available models so the picker is populated by the time the user
+        // opens the cleanup card.
+        if !cloudCopilotOAuthToken.isEmpty {
+            Task { @MainActor [weak self] in self?.refreshCopilotModels() }
+        }
+    }
+
+    private func saveCloudConfig() {
+        let d = UserDefaults.standard
+        d.set(cloudOpenAIBaseURL, forKey: Self.cloudOpenAIBaseURLKey)
+        d.set(cloudOpenAIModel, forKey: Self.cloudOpenAIModelKey)
+        d.set(cloudOpenAIKey, forKey: Self.cloudOpenAIKeyKey)
+        d.set(cloudAnthropicModel, forKey: Self.cloudAnthropicModelKey)
+        d.set(cloudAnthropicKey, forKey: Self.cloudAnthropicKeyKey)
+        d.set(cloudCopilotModel, forKey: Self.cloudCopilotModelKey)
+        d.set(cloudCopilotOAuthToken, forKey: Self.cloudCopilotOAuthTokenKey)
+        pushCloudConfigToCoordinator()
+        if cleanupEngine.isCloud && cleanupMode != .off {
+            ensureCleanupModelReady()
+        }
+    }
+
+    private func pushCloudConfigToCoordinator() {
+        var config = LLMTranscriptCleaner.CloudConfig()
+        config.openAIBaseURL = cloudOpenAIBaseURL
+        config.openAIModel = cloudOpenAIModel
+        config.openAIKey = cloudOpenAIKey
+        config.anthropicModel = cloudAnthropicModel
+        config.anthropicKey = cloudAnthropicKey
+        config.copilotModel = cloudCopilotModel
+        config.copilotOAuthToken = cloudCopilotOAuthToken
+        coordinator.setCleanupCloudConfig(config)
+    }
+
+    /// Start the GitHub Copilot device-flow login. Returns the device code so
+    /// the view can show the user code + verification URL.
+    func startCopilotSignIn() {
+        guard !copilotAuthInProgress else { return }
+        copilotAuthInProgress = true
+        copilotAuthError = nil
+        copilotDeviceCode = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let code = try await CopilotAuthService.requestDeviceCode()
+                self.copilotDeviceCode = code
+                // Auto-open browser to make the flow one-click
+                if let url = URL(string: code.verificationURL) {
+                    NSWorkspace.shared.open(url)
+                }
+                let token = try await CopilotAuthService.pollForOAuthToken(deviceCode: code)
+                self.cloudCopilotOAuthToken = token
+                self.copilotDeviceCode = nil
+                self.copilotAuthInProgress = false
+                self.refreshCopilotModels()
+            } catch {
+                self.copilotAuthError = String(describing: error)
+                self.copilotDeviceCode = nil
+                self.copilotAuthInProgress = false
+            }
+        }
+    }
+
+    func signOutOfCopilot() {
+        cloudCopilotOAuthToken = ""
+        copilotDeviceCode = nil
+        copilotAuthError = nil
+        copilotAvailableModels = []
+    }
+
+    func refreshCopilotModels() {
+        guard !cloudCopilotOAuthToken.isEmpty else { return }
+        copilotModelsLoading = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let models = await self.coordinator.fetchCopilotModels()
+            self.copilotAvailableModels = models
+            self.copilotModelsLoading = false
+            // If the user's saved model isn't in the list, fall back to the first available.
+            if !models.isEmpty && !models.contains(self.cloudCopilotModel) {
+                self.cloudCopilotModel = models.first ?? self.cloudCopilotModel
+            }
+        }
+    }
+
+    func applyOpenAIPreset(_ preset: OpenAICompatPreset) {
+        guard preset.id != "custom" else { return }
+        cloudOpenAIBaseURL = preset.baseURL
+        cloudOpenAIModel = preset.defaultModel
     }
 
     var cleanupReady: Bool {
@@ -76,17 +213,10 @@ final class VoiceTyperViewModel: ObservableObject {
         return false
     }
 
-    var cleanupDownloadProgress: Double? {
-        if case .downloading(let p) = cleanupState { return p }
-        return nil
-    }
-
     var cleanupStatusLabel: String {
         switch cleanupState {
         case .unloaded:
             return cleanupMode == .off ? "Off" : "Not loaded"
-        case .downloading(let p):
-            return "Downloading \(Int(p * 100))%"
         case .loading:
             return "Loading…"
         case .ready:
@@ -102,14 +232,18 @@ final class VoiceTyperViewModel: ObservableObject {
         switch cleanupEngine {
         case .foundationModels:
             return "Check Apple Intelligence"
-        case .gemma:
-            return "Download Gemma model"
+        case .githubCopilot:
+            return "Sign in to GitHub Copilot"
+        case .openAICompatible:
+            return "Connect OpenAI-compatible API"
+        case .anthropic:
+            return "Connect Anthropic API"
         }
     }
 
     var cleanupCanLoad: Bool {
         switch cleanupState {
-        case .downloading, .loading, .ready:
+        case .loading, .ready:
             return false
         default:
             return true
@@ -126,7 +260,7 @@ final class VoiceTyperViewModel: ObservableObject {
 
     func ensureCleanupModelReady() {
         switch cleanupState {
-        case .ready, .downloading, .loading:
+        case .ready, .loading:
             return
         default:
             onPrepareCleanupModel?()
