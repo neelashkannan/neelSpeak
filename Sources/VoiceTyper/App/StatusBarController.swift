@@ -45,10 +45,15 @@ final class StatusBarController: NSObject {
 
     func update(state: DictationCoordinator.State) {
         guard let button = item.button else { return }
-        button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: state.title)
-        button.image?.isTemplate = true
-        button.imagePosition = .imageLeading
-        button.title = " NeelSpeak"
+
+        if let img = loadMenuBarIcon() {
+            button.image = img
+            button.image?.isTemplate = false
+        } else {
+            button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: state.title)
+            button.image?.isTemplate = true
+        }
+        button.imagePosition = .imageOnly
 
         switch state {
         case .setupRequired:
@@ -76,5 +81,15 @@ final class StatusBarController: NSObject {
 
     @objc private func retrySetup() {
         onRetrySetup?()
+    }
+
+    private func loadMenuBarIcon() -> NSImage? {
+        let url = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/MenuBarIcon.png")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let img = NSImage(contentsOf: url) else { return nil }
+        img.size = NSSize(width: 18, height: 18)
+        img.isTemplate = false
+        return img
     }
 }

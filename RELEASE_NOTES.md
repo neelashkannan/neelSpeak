@@ -1,24 +1,22 @@
-# NeelSpeak v0.2.0
+# NeelSpeak v0.2.1
 
-This release upgrades NeelSpeak from basic on-device dictation to configurable voice typing with optional AI transcript cleanup.
+This release polishes NeelSpeak's macOS UI and ships the new app and menu bar icons.
 
 ## What's new
 
-- Optional AI cleanup removes fillers, stutters, repetitions, and course corrections before text is pasted.
-- Cleanup engines now include Apple Intelligence, GitHub Copilot, OpenAI-compatible providers, and Anthropic Claude.
-- GitHub Copilot sign-in uses browser-based device flow and automatically refreshes short-lived session tokens.
-- OpenAI-compatible presets cover GitHub Models, OpenAI, OpenRouter, Groq, Ollama, OpenCode, and custom endpoints.
-- The dashboard now includes cleanup controls, provider configuration, overlay themes, and transcript history.
-- The dictation pipeline now shows a dedicated "Cleaning up" state between transcription and paste.
+- New custom app icon is bundled into `NeelSpeak.app` and used throughout the dashboard.
+- New custom menu bar icon replaces the previous text-heavy status item.
+- The control centre has been tightened into a cleaner split layout with a slim header, cleanup settings, recent dictations, status, and pill appearance controls.
+- Release packaging now includes PNG and ICNS image assets so the icons are present in local builds and GitHub release DMGs.
 
 ## Version comparison
 
-| Area | v0.1.0 | v0.2.0 |
+| Area | v0.2.0 | v0.2.1 |
 |------|--------|--------|
-| Dictation | On-device Parakeet transcription and paste | Same core flow, plus optional cleanup before paste |
-| Cleanup | Not available in the tagged release | Apple Intelligence, GitHub Copilot, OpenAI-compatible, and Anthropic engines |
-| Settings | Basic setup/model flow | Full cleanup/provider configuration, persisted preferences, and transcript history |
-| Packaging | ZIP/DMG release groundwork | DMG-first release notes and restored build scripts for tag releases |
+| Dashboard | Full cleanup/provider configuration, overlay themes, and transcript history | Compact control centre with cleanup, recent dictations, status, and appearance panels |
+| Menu bar | SF Symbol plus text label | Custom icon-only menu bar item |
+| App identity | Default/generated visual mark in some surfaces | Bundled app icon reused in app metadata and dashboard |
+| Packaging | DMG-first release workflow | DMG release includes app/menu icon PNG and ICNS assets |
 
 ## Install
 

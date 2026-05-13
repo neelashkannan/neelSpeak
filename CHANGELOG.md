@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.1
+
+### Added
+
+- Bundled custom app and menu bar icons for the app bundle, dashboard header, and macOS status item.
+- Release packaging now copies PNG and ICNS image assets into `NeelSpeak.app`.
+
+### Changed
+
+- Refined the dashboard into a compact control centre with a slimmer header, cleanup settings, status sidebar, pill appearance controls, and recent dictations.
+- Updated the menu bar item to show the custom icon without the text label for a cleaner macOS menu bar presence.
+
 ## v0.2.0
 
 ### Added

@@ -228,59 +228,293 @@ private struct ControlCenterView: View {
     @ObservedObject var viewModel: VoiceTyperViewModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    HStack(spacing: 12) {
-                        AppIconMark()
-                            .frame(width: 42, height: 42)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("NeelSpeak")
-                                .font(.system(size: 26, weight: .bold))
-                            Text("Menu-bar voice typing. Hold Option anywhere to dictate.")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    StatusBadge(state: viewModel.state)
-                }
-
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        ShortcutCard(viewModel: viewModel)
-                        CleanupCard(viewModel: viewModel)
+        VStack(spacing: 0) {
+            ControlHeader(viewModel: viewModel)
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        CleanupSection(viewModel: viewModel)
+                        Divider()
                         TranscriptPanel(entries: viewModel.recentTranscripts)
-                            .frame(minHeight: 118)
                     }
-                    .frame(maxWidth: .infinity)
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        RuntimeCard(viewModel: viewModel)
-                        OverlayThemePicker(store: viewModel.themeStore)
-                    }
-                    .frame(width: 260)
                 }
+                .frame(maxWidth: .infinity)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 0) {
+                    StatusSidebar(viewModel: viewModel)
+                    Divider()
+                    AppearanceSidebar(store: viewModel.themeStore)
+                    Spacer()
+                }
+                .frame(width: 228)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }
 
-private struct OverlayThemePicker: View {
+private struct ControlHeader: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AppIconMark()
+                .frame(width: 28, height: 28)
+
+            Text("NeelSpeak")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+            HStack(spacing: 3) {
+                Text("⌥")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                Text("Option")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.16), lineWidth: 0.5))
+
+            Spacer()
+
+            StatusBadge(state: viewModel.state)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 52)
+    }
+}
+
+private struct SectionLabel: View {
+    let title: String
+    var trailing: String? = nil
+
+    var body: some View {
+        HStack {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .kerning(0.5)
+            Spacer()
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+}
+
+private struct SettingsRow<Control: View>: View {
+    let label: String
+    var detail: String? = nil
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 13))
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            control
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 9)
+    }
+}
+
+private struct CleanupSection: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(title: "Speech Cleanup", trailing: viewModel.cleanupStatusLabel)
+
+            SettingsRow(
+                label: "Mode",
+                detail: viewModel.cleanupMode == .off ? nil : viewModel.cleanupMode.subtitle
+            ) {
+                Picker("Mode", selection: $viewModel.cleanupMode) {
+                    ForEach(CleanupMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+            }
+
+            Divider().padding(.leading, 20)
+
+            SettingsRow(
+                label: "Engine",
+                detail: viewModel.cleanupMode == .off ? nil : viewModel.cleanupEngine.subtitle
+            ) {
+                Picker("Engine", selection: $viewModel.cleanupEngine) {
+                    ForEach(CleanupEngine.allCases) { engine in
+                        Text(engine.displayName).tag(engine)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 180)
+                .disabled(viewModel.cleanupMode == .off)
+            }
+
+            if viewModel.cleanupMode != .off {
+                Divider().padding(.leading, 20)
+                engineConfigView
+            }
+
+            if case .failed(let msg) = viewModel.cleanupState {
+                Divider().padding(.leading, 20)
+                Label(msg.prefix(160).description, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if case .unsupported(let msg) = viewModel.cleanupState {
+                Divider().padding(.leading, 20)
+                Label(msg, systemImage: "info.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+        }
+    }
+
+    @ViewBuilder
+    private var engineConfigView: some View {
+        switch viewModel.cleanupEngine {
+        case .openAICompatible:
+            OpenAICompatConfigView(viewModel: viewModel)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+        case .anthropic:
+            AnthropicConfigView(viewModel: viewModel)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+        case .githubCopilot:
+            CopilotConfigView(viewModel: viewModel)
+                .padding(.horizontal, 20).padding(.vertical, 8)
+        case .foundationModels:
+            HStack {
+                Button {
+                    viewModel.loadCleanupModelNow()
+                } label: {
+                    Label(viewModel.cleanupActionLabel, systemImage: "arrow.down.circle.fill")
+                }
+                .disabled(!viewModel.cleanupCanLoad)
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.vertical, 9)
+        }
+    }
+}
+
+private struct StatusSidebar: View {
+    @ObservedObject var viewModel: VoiceTyperViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(title: "Status")
+
+            SidebarInfoRow(
+                icon: "command",
+                title: "Accessibility",
+                value: viewModel.accessibilityLabel,
+                good: viewModel.accessibilityTrusted
+            )
+            Divider().padding(.leading, 46)
+            SidebarInfoRow(
+                icon: "cpu",
+                title: "Model",
+                value: viewModel.selectedModel.displayName,
+                good: viewModel.modelReady
+            )
+
+            Divider()
+
+            Button {
+                viewModel.finishSetupAndRunInBackground()
+            } label: {
+                Label("Run in Background", systemImage: "menubar.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.regular)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+}
+
+private struct SidebarInfoRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    let good: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(good ? Color.green : Color.orange)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                Text(value)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+    }
+}
+
+private struct AppearanceSidebar: View {
     @ObservedObject var store: OverlayThemeStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Pill appearance", systemImage: "paintpalette.fill")
-                .font(.system(size: 16, weight: .bold))
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(title: "Pill Appearance")
 
             HStack(spacing: 10) {
-                OverlayThemePreview(theme: store.theme)
-                    .frame(width: 74, height: 30)
+                Capsule()
+                    .fill(store.theme.fill)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                AngularGradient(
+                                    colors: store.theme.borderColors + [store.theme.borderColors.first ?? .white],
+                                    center: .center
+                                ),
+                                lineWidth: 2
+                            )
+                    )
+                    .frame(width: 54, height: 24)
 
-                Picker("Pill color", selection: $store.selectedID) {
+                Picker("Color", selection: $store.selectedID) {
                     ForEach(OverlayThemeCatalog.all) { theme in
                         Text(theme.name).tag(theme.id)
                     }
@@ -289,222 +523,9 @@ private struct OverlayThemePicker: View {
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
             }
-
-            Text("Changes only the floating pill shown while you dictate.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
         }
-        .padding(16)
-        .cardBackground()
-    }
-}
-
-private struct OverlayThemePreview: View {
-    let theme: OverlayTheme
-
-    var body: some View {
-        Capsule()
-            .fill(theme.fill)
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        AngularGradient(
-                            colors: theme.borderColors + [theme.borderColors.first ?? .white],
-                            center: .center
-                        ),
-                        lineWidth: 2
-                    )
-            )
-    }
-}
-
-private struct ShortcutCard: View {
-    @ObservedObject var viewModel: VoiceTyperViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Global shortcut", systemImage: "keyboard")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-
-                    Text("Hold Option anywhere")
-                        .font(.system(size: 26, weight: .bold))
-
-                    Text("NeelSpeak stays out of the way and types into the app you are already using.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(viewModel.state.title)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(viewModel.state.accentColor)
-                    Text(viewModel.state.detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: 190, alignment: .trailing)
-            }
-
-            HStack(spacing: 8) {
-                ShortcutStep(title: "Hold", value: "Option", symbol: "option")
-                ShortcutStep(title: "Speak", value: "Anywhere", symbol: "text.bubble")
-                ShortcutStep(title: "Release", value: "Types text", symbol: "text.cursor")
-            }
-        }
-        .padding(18)
-        .cardBackground()
-    }
-}
-
-private struct ShortcutStep: View {
-    let title: String
-    let value: String
-    let symbol: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(width: 18)
-                .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 16, weight: .bold))
-                Text(value)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-private struct RuntimeCard: View {
-    @ObservedObject var viewModel: VoiceTyperViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("System status")
-                .font(.system(size: 20, weight: .bold))
-
-            CompactInfoRow(title: "Accessibility", value: viewModel.accessibilityLabel, icon: "command", good: viewModel.accessibilityTrusted)
-            CompactInfoRow(title: "Model", value: viewModel.selectedModel.displayName, icon: "cpu", good: viewModel.modelReady)
-
-            Button {
-                viewModel.finishSetupAndRunInBackground()
-            } label: {
-                Label("Run in Background", systemImage: "menubar.rectangle")
-                    .frame(maxWidth: .infinity)
-            }
-            .controlSize(.large)
-        }
-        .padding(18)
-        .cardBackground()
-    }
-}
-
-private struct CleanupCard: View {
-    @ObservedObject var viewModel: VoiceTyperViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Speech cleanup", systemImage: "wand.and.stars")
-                    .font(.system(size: 16, weight: .bold))
-                Spacer()
-                Text(viewModel.cleanupStatusLabel)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("After each dictation, a local AI model strips fillers (um, uh, like), stutters, repetitions, and course corrections.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Mode")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Picker("Mode", selection: $viewModel.cleanupMode) {
-                    ForEach(CleanupMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                if viewModel.cleanupMode != .off {
-                    Text(viewModel.cleanupMode.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Engine")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Picker("Engine", selection: $viewModel.cleanupEngine) {
-                    ForEach(CleanupEngine.allCases) { engine in
-                        Text(engine.displayName).tag(engine)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(viewModel.cleanupMode == .off)
-                Text(viewModel.cleanupEngine.subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if case .failed(let msg) = viewModel.cleanupState {
-                Label(msg.prefix(160).description, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if case .unsupported(let msg) = viewModel.cleanupState {
-                Label(msg, systemImage: "info.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            switch viewModel.cleanupEngine {
-            case .openAICompatible:
-                OpenAICompatConfigView(viewModel: viewModel)
-            case .anthropic:
-                AnthropicConfigView(viewModel: viewModel)
-            case .githubCopilot:
-                CopilotConfigView(viewModel: viewModel)
-            case .foundationModels:
-                HStack {
-                    Button {
-                        viewModel.loadCleanupModelNow()
-                    } label: {
-                        Label(viewModel.cleanupActionLabel, systemImage: "arrow.down.circle.fill")
-                    }
-                    .disabled(!viewModel.cleanupCanLoad)
-                    Spacer()
-                }
-            }
-        }
-        .padding(18)
-        .cardBackground()
     }
 }
 
@@ -764,33 +785,30 @@ private struct TranscriptPanel: View {
     let entries: [VoiceTyperViewModel.TranscriptEntry]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Recent text", systemImage: "text.quote")
-                    .font(.system(size: 16, weight: .bold))
-                Spacer()
-                Text("\(entries.count) saved")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(
+                title: "Recent Dictations",
+                trailing: entries.isEmpty ? nil : "\(entries.count) saved"
+            )
 
             if entries.isEmpty {
-                Text("Your last dictations will appear here.")
-                    .font(.system(size: 14))
+                Text("Your last dictations appear here after you dictate.")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         ForEach(entries) { entry in
                             TranscriptCard(entry: entry)
                         }
                     }
+                    .padding(.horizontal, 20)
                 }
+                .padding(.bottom, 12)
             }
         }
-        .padding(18)
-        .cardBackground()
     }
 }
 
@@ -950,7 +968,7 @@ private struct SetupStepRow: View {
     }
 }
 
-private struct CompactInfoRow: View {
+private struct CompactInfoRow: View { // kept for setup flow
     let title: String
     let value: String
     let icon: String
@@ -995,17 +1013,29 @@ private struct StatusBadge: View {
 
 private struct AppIconMark: View {
     var body: some View {
-        ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.blue.gradient)
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach([16, 28, 22, 34, 19], id: \.self) { height in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(.white)
-                        .frame(width: 4, height: CGFloat(height))
-                }
+        let url = Bundle.main.bundleURL
+                .appendingPathComponent("Contents/Resources/AppIcon.png")
+        if FileManager.default.fileExists(atPath: url.path),
+           let img = NSImage(contentsOf: url) {
+            Image(nsImage: img)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(LinearGradient(
+                        colors: [
+                            Color(red: 0.12, green: 0.42, blue: 0.98),
+                            Color(red: 0.05, green: 0.22, blue: 0.76)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                Image(systemName: "waveform")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
             }
-            .padding(.bottom, 9)
         }
     }
 }

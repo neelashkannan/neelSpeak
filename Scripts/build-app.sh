@@ -28,6 +28,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_FILE" "$APP/Contents/MacOS/NeelSpeak"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
+# Copy image assets
+for img in "$ROOT/Resources/"*.png "$ROOT/Resources/"*.icns; do
+    [ -f "$img" ] && cp "$img" "$APP/Contents/Resources/"
+done
+
 # Copy any SwiftPM resource bundles next to the binary so packaged dependencies
 # can find their runtime assets.
 shopt -s nullglob

@@ -14,7 +14,7 @@ NeelSpeak is a lightweight macOS menu-bar app that lets you dictate text into **
 
 Optionally, an AI cleanup stage removes fillers, stutters, and course corrections before the text lands. You choose the engine: fully on-device Apple Intelligence, your existing GitHub Copilot subscription, a local Ollama server, or any OpenAI-compatible/Anthropic API.
 
-**Current release:** `v0.2.0`
+**Current release:** `v0.2.1`
 
 ---
 
@@ -25,7 +25,9 @@ Optionally, an AI cleanup stage removes fillers, stutters, and course correction
 - ✨ **AI transcript cleanup** — removes fillers, stutters, and course corrections
 - ⚡ **Apple Silicon native** (arm64)
 - 🖥️ **Menu bar app** — lives quietly in your status bar
+- 🧭 **Custom app + menu bar icons** for a more polished macOS presence
 - 🎨 **Listening overlay** with customisable themes
+- 🧩 **Compact control centre** for cleanup, status, appearance, and recent dictations
 - 📋 **Transcript history** in the dashboard window
 - 🆓 **Free and open-source**
 
