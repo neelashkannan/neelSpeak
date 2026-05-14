@@ -51,7 +51,25 @@ class DictationCoordinator(private val appContext: Context) {
         }
     }
 
+    fun warmStt(): Boolean {
+        if (!store.isParakeetInstalled()) {
+            _state.value = DictationState.SetupRequired
+            return false
+        }
+        _state.value = DictationState.Warming
+        return if (stt.load()) {
+            _state.value = DictationState.Idle
+            true
+        } else {
+            _state.value = DictationState.Error("Parakeet runtime is missing or could not load")
+            false
+        }
+    }
+
     fun beginDictation() {
+        if (_state.value is DictationState.SetupRequired && store.isParakeetInstalled()) {
+            _state.value = DictationState.Idle
+        }
         if (_state.value !is DictationState.Idle) return
         if (!audio.hasMicPermission()) {
             _state.value = DictationState.Error("Microphone permission denied")
@@ -86,7 +104,7 @@ class DictationCoordinator(private val appContext: Context) {
                     _state.value = DictationState.Cleaning
                     cleaner.clean(corrected, mode)
                 }
-                if (cleaned.isNotEmpty()) _transcripts.emit(cleaned)
+                _transcripts.emit(cleaned)
                 _state.value = DictationState.Idle
             } catch (t: Throwable) {
                 Log.e("NeelSpeak.Coord", "pipeline failed: ${t.message}", t)

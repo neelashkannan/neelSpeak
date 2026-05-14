@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'pages/home_page.dart';
 import 'pages/onboarding/onboarding_flow.dart';
 import 'state/settings_provider.dart';
+import 'ui/app_theme.dart';
 
 void main() {
   runApp(const ProviderScope(child: NeelSpeakApp()));
@@ -18,10 +19,9 @@ class NeelSpeakApp extends ConsumerWidget {
     return MaterialApp(
       title: 'NeelSpeak',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF3366FF),
-      ),
+      theme: NeelSpeakTheme.light(),
+      darkTheme: NeelSpeakTheme.dark(),
+      themeMode: ThemeMode.system,
       home: settings.setupComplete ? const HomePage() : const OnboardingFlow(),
     );
   }

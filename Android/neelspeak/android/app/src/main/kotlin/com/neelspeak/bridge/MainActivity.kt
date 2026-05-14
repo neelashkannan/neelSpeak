@@ -1,5 +1,6 @@
 package com.neelspeak.bridge
 
+import com.neelspeak.app.NeelSpeakApplication
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -19,5 +20,6 @@ class MainActivity : FlutterActivity() {
         ImeStatusChannel(this).register(messenger)
         SystemChannel(this).register(messenger)
         CleanupChannel(this).register(messenger)
+        DictationChannel(application as NeelSpeakApplication).register(messenger)
     }
 }

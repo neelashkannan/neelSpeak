@@ -1,12 +1,13 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.neelspeak"
-    compileSdk = 34
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -15,35 +16,30 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
+    buildFeatures {
+        compose = true
     }
 
     defaultConfig {
         applicationId = "com.neelspeak"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
-    packaging {
-        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-    }
-
     buildTypes {
+        debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
         release {
-            // Debug signing for now; ship with a release keystore before publishing.
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
@@ -64,23 +60,25 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")
+    implementation("androidx.savedstate:savedstate-ktx:1.2.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // OkHttp for cleanup engine HTTP clients
+    // HTTP clients for cleanup engines
     implementation(platform("com.squareup.okhttp3:okhttp-bom:4.12.0"))
     implementation("com.squareup.okhttp3:okhttp")
     implementation("org.json:json:20240303")
 
-    // EncryptedSharedPreferences
+    // EncryptedSharedPreferences for API keys + OAuth tokens
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // sherpa-onnx Android AAR for Parakeet STT
-    // The official k2-fsa/sherpa-onnx releases publish prebuilt AARs.
-    // Drop sherpa-onnx-X.Y.Z.aar into android/app/libs/ — see README.
+    // Apache Commons Compress for tar.bz2 extraction of the Parakeet bundle
+    implementation("org.apache.commons:commons-compress:1.26.2")
+
+    // sherpa-onnx Android runtime for Parakeet STT.
     implementation(fileTree("libs") { include("*.aar") })
 
-    // MediaPipe GenAI for on-device Gemma cleanup engine.
+    // MediaPipe GenAI for on-device Gemma cleanup
     implementation("com.google.mediapipe:tasks-genai:0.10.14")
 }

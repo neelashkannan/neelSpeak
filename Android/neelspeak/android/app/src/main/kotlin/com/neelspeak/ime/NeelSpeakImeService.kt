@@ -5,38 +5,34 @@ import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.savedstate.SavedStateRegistryOwner
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.neelspeak.app.NeelSpeakApplication
-import com.neelspeak.coordinator.DictationState
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * The Android IME. Replaces the system keyboard with a single press-and-hold
- * mic pill. When the coordinator emits a cleaned transcript, we forward it
- * straight into the focused text field via InputConnection.commitText.
- *
- * Mirrors the role of HotkeyManager + TextInjector + DictationCoordinator's UI
- * surface on macOS — gesture in, text out.
+ * The Android IME. Renders the Compose press-and-hold mic pill inside a
+ * LifecycleWrapper that — on attachment — walks up to the IME window root
+ * and stamps the ViewTree owners there, which is where Compose actually
+ * looks for them (not on the ComposeView itself).
  */
 class NeelSpeakImeService : InputMethodService(),
     LifecycleOwner,
@@ -47,7 +43,6 @@ class NeelSpeakImeService : InputMethodService(),
     private val savedStateController = SavedStateRegistryController.create(this)
     private val vmStore = ViewModelStore()
     private var scope: CoroutineScope? = null
-    private var collectJob: Job? = null
     private val lastTranscript = mutableStateOf<String?>(null)
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -58,28 +53,23 @@ class NeelSpeakImeService : InputMethodService(),
         super.onCreate()
         savedStateController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        scope = MainScope()
     }
 
     override fun onCreateInputView(): View {
         val app = applicationContext as NeelSpeakApplication
         val coord = app.coordinator
 
-        scope = MainScope()
-        collectJob?.cancel()
-        collectJob = scope!!.launch {
-            launch {
-                coord.transcripts.collectLatest { text ->
-                    val ic = currentInputConnection ?: return@collectLatest
-                    ic.commitText(text + " ", 1)
-                    lastTranscript.value = text
-                }
+        scope?.launch {
+            coord.transcripts.collectLatest { text ->
+                currentInputConnection?.commitText(text + " ", 1)
+                lastTranscript.value = text
             }
         }
 
-        return ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@NeelSpeakImeService)
-            setViewTreeViewModelStoreOwner(this@NeelSpeakImeService)
-            setViewTreeSavedStateRegistryOwner(this@NeelSpeakImeService)
+        val composeView = ComposeView(this).apply {
             setContent {
                 NeelSpeakImeTheme {
                     val state by coord.state.collectAsState()
@@ -95,35 +85,37 @@ class NeelSpeakImeService : InputMethodService(),
                 }
             }
         }
-    }
 
-    override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
-        super.onStartInputView(info, restarting)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-    }
-
-    override fun onFinishInputView(finishingInput: Boolean) {
-        super.onFinishInputView(finishingInput)
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        // Walk up to the window root on attachment and stamp the ViewTree owners
+        // there — that's where Compose's WindowRecomposer looks for them.
+        return object : FrameLayout(this) {
+            override fun onAttachedToWindow() {
+                super.onAttachedToWindow()
+                var root: View = this
+                while (root.parent is View) root = root.parent as View
+                root.setViewTreeLifecycleOwner(this@NeelSpeakImeService)
+                root.setViewTreeViewModelStoreOwner(this@NeelSpeakImeService)
+                root.setViewTreeSavedStateRegistryOwner(this@NeelSpeakImeService)
+            }
+        }.also { it.addView(composeView) }
     }
 
     override fun onDestroy() {
-        collectJob?.cancel()
         scope?.cancel()
+        scope = null
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         super.onDestroy()
     }
 
     private fun showKeyboardPicker() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.showInputMethodPicker()
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
     }
 
     private fun openSettingsApp() {
-        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        } ?: return
-        startActivity(launch)
+        packageManager.getLaunchIntentForPackage(packageName)
+            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ?.let { startActivity(it) }
     }
-
 }

@@ -34,6 +34,7 @@ object CopilotAuthService {
         val deviceCode: String,
         val userCode: String,
         val verificationURL: String,
+        val verificationURLComplete: String?,
         val pollIntervalSeconds: Int,
         val expiresAtMillis: Long,
     )
@@ -66,6 +67,8 @@ object CopilotAuthService {
                 deviceCode = json.getString("device_code"),
                 userCode = json.getString("user_code"),
                 verificationURL = json.getString("verification_uri"),
+                verificationURLComplete = json.optString("verification_uri_complete")
+                    .takeIf { it.isNotEmpty() },
                 pollIntervalSeconds = json.getInt("interval"),
                 expiresAtMillis = System.currentTimeMillis() + json.getInt("expires_in") * 1000L,
             )

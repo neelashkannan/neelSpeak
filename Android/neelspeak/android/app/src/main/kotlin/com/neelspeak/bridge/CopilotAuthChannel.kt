@@ -34,6 +34,7 @@ class CopilotAuthChannel(context: Context) {
                                 "deviceCode" to code.deviceCode,
                                 "userCode" to code.userCode,
                                 "verificationUrl" to code.verificationURL,
+                                "verificationUrlComplete" to code.verificationURLComplete,
                                 "intervalSeconds" to code.pollIntervalSeconds,
                                 "expiresAtMillis" to code.expiresAtMillis,
                             ))
@@ -55,6 +56,7 @@ class CopilotAuthChannel(context: Context) {
                             deviceCode = deviceCode,
                             userCode = "",
                             verificationURL = "",
+                            verificationURLComplete = null,
                             pollIntervalSeconds = interval,
                             expiresAtMillis = expiresAt,
                         )

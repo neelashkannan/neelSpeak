@@ -73,7 +73,7 @@ class CopilotCleanupClient {
             val ids = mutableListOf<String>()
             for (i in 0 until data.length()) {
                 val item = data.optJSONObject(i) ?: continue
-                val id = item.optString("id").ifEmpty { continue }
+                val id = item.optString("id").takeIf { it.isNotEmpty() } ?: continue
                 val caps = item.optJSONObject("capabilities")
                 if (caps != null && caps.optString("type", "chat") != "chat") continue
                 if (item.has("model_picker_enabled") && !item.optBoolean("model_picker_enabled")) continue

@@ -97,6 +97,7 @@ final systemChannelProvider = Provider<SystemChannel>((_) => SystemChannel());
 final modelChannelProvider = Provider<ModelChannel>((_) => ModelChannel());
 final copilotChannelProvider = Provider<CopilotChannel>((_) => CopilotChannel());
 final cleanupChannelProvider = Provider<CleanupChannel>((_) => CleanupChannel());
+final dictationChannelProvider = Provider<DictationChannel>((_) => DictationChannel());
 
 final imeStatusProvider = StreamProvider<Map<Object?, Object?>>((_) => ImeStatusChannel().stream());
 final modelDownloadProvider =

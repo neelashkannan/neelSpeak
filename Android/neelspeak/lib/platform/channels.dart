@@ -27,10 +27,25 @@ class SettingsChannel {
 class SystemChannel {
   static const _channel = MethodChannel('neelspeak/system');
 
-  Future<void> openImeSettings() => _channel.invokeMethod<void>('openImeSettings');
+  Future<void> openImeSettings() =>
+      _channel.invokeMethod<void>('openImeSettings');
   Future<void> showImePicker() => _channel.invokeMethod<void>('showImePicker');
-  Future<bool> isEnabledIme() async => await _channel.invokeMethod<bool>('isEnabledIme') ?? false;
-  Future<bool> isDefaultIme() async => await _channel.invokeMethod<bool>('isDefaultIme') ?? false;
+  Future<bool> isEnabledIme() async =>
+      await _channel.invokeMethod<bool>('isEnabledIme') ?? false;
+  Future<bool> isDefaultIme() async =>
+      await _channel.invokeMethod<bool>('isDefaultIme') ?? false;
+
+  /// Tries to open [url] in [preferredPackage] (e.g. "com.github.android"); if
+  /// the app isn't installed, falls back to the default browser. Returns one
+  /// of "app", "browser", or "none".
+  Future<String> openUrlPreferringApp(String url,
+      {String? preferredPackage}) async {
+    final result = await _channel.invokeMethod<String>(
+      'openUrlPreferringApp',
+      {'url': url, 'package': preferredPackage},
+    );
+    return result ?? 'none';
+  }
 }
 
 class ModelChannel {
@@ -42,11 +57,15 @@ class ModelChannel {
   Future<bool> isLlmInstalled() async =>
       await _channel.invokeMethod<bool>('isLlmInstalled') ?? false;
 
-  Future<void> downloadFile({required String url, required String relPath}) =>
-      _channel.invokeMethod<void>('downloadFile', {'url': url, 'relPath': relPath});
+  Future<void> downloadParakeet() =>
+      _channel.invokeMethod<void>('downloadParakeet');
+  Future<void> downloadLlm(String url) =>
+      _channel.invokeMethod<void>('downloadLlm', {'url': url});
 
-  Future<void> cancelDownload() => _channel.invokeMethod<void>('cancelDownload');
-  Future<void> deleteParakeet() => _channel.invokeMethod<void>('deleteParakeet');
+  Future<void> cancelDownload() =>
+      _channel.invokeMethod<void>('cancelDownload');
+  Future<void> deleteParakeet() =>
+      _channel.invokeMethod<void>('deleteParakeet');
   Future<void> deleteLlm() => _channel.invokeMethod<void>('deleteLlm');
 
   Stream<Map<Object?, Object?>> progress() =>
@@ -57,7 +76,8 @@ class CopilotChannel {
   static const _channel = MethodChannel('neelspeak/copilot');
 
   Future<Map<String, Object?>> requestDeviceCode() async {
-    final r = await _channel.invokeMapMethod<String, Object?>('requestDeviceCode');
+    final r =
+        await _channel.invokeMapMethod<String, Object?>('requestDeviceCode');
     return r ?? <String, Object?>{};
   }
 
@@ -78,7 +98,8 @@ class CopilotChannel {
 class CleanupChannel {
   static const _channel = MethodChannel('neelspeak/cleanup');
 
-  Future<Map<String, Object?>> test({required String text, required String mode}) async {
+  Future<Map<String, Object?>> test(
+      {required String text, required String mode}) async {
     final r = await _channel.invokeMapMethod<String, Object?>(
       'test',
       {'text': text, 'mode': mode},
@@ -96,4 +117,19 @@ class ImeStatusChannel {
   static const _channel = EventChannel('neelspeak/ime/status');
   Stream<Map<Object?, Object?>> stream() =>
       _channel.receiveBroadcastStream().cast<Map<Object?, Object?>>();
+}
+
+/// Lets the onboarding "Test STT" page drive the shared coordinator without
+/// going through the keyboard.
+class DictationChannel {
+  static const _channel = MethodChannel('neelspeak/dictation');
+
+  Future<bool> warm() async =>
+      await _channel.invokeMethod<bool>('warm') ?? false;
+  Future<String> start() async =>
+      await _channel.invokeMethod<String>('start') ?? '';
+  Future<String> stopAndAwait() async =>
+      await _channel.invokeMethod<String>('stopAndAwait') ?? '';
+  Future<String> state() async =>
+      await _channel.invokeMethod<String>('state') ?? '';
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/settings_provider.dart';
+import '../../ui/premium_widgets.dart';
 
 class TestCleanupPage extends ConsumerStatefulWidget {
   const TestCleanupPage({super.key});
@@ -39,41 +40,66 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Test cleanup')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          TextField(
-            controller: _input,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Raw transcript'),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _running ? null : _run,
-            child: Text(_running ? 'Running…' : 'Run cleanup'),
-          ),
-          if (_output != null) ...[
-            const SizedBox(height: 24),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
+      backgroundColor: Colors.transparent,
+      body: AppBackdrop(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            children: [
+              const SectionIntro(
+                eyebrow: 'Verification',
+                title: 'Dry-run the current cleanup stack.',
+                subtitle:
+                    'Send a sample transcript through the configured cleanup engine and check the final output before you start dictating.',
+              ),
+              const SizedBox(height: 20),
+              GlassPanel(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Output (${_latencyMs ?? 0} ms)',
-                        style: Theme.of(context).textTheme.labelMedium),
-                    const SizedBox(height: 8),
-                    SelectableText(_output!),
+                    TextField(
+                      controller: _input,
+                      maxLines: 5,
+                      decoration: const InputDecoration(
+                        labelText: 'Raw transcript',
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: _running ? null : _run,
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: Text(_running ? 'Running…' : 'Run cleanup'),
+                    ),
                   ],
                 ),
               ),
-            ),
-          ],
-          if (_error != null) Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              if (_output != null) ...[
+                const SizedBox(height: 16),
+                GlassPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      InfoPill(
+                        label: 'Output (${_latencyMs ?? 0} ms)',
+                        icon: Icons.timer_outlined,
+                      ),
+                      const SizedBox(height: 16),
+                      SelectableText(_output!),
+                    ],
+                  ),
+                ),
+              ],
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

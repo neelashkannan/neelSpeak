@@ -2,6 +2,10 @@ package com.neelspeak.stt
 
 import android.content.Context
 import android.util.Log
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import java.io.File
 
 /**
@@ -11,54 +15,43 @@ import java.io.File
  */
 interface SttEngine {
     fun isReady(): Boolean
+    fun load(): Boolean
     suspend fun transcribe(samples: FloatArray, sampleRate: Int): String
     fun release()
 }
 
 /**
- * sherpa-onnx Parakeet implementation. Uses reflection so the module compiles
- * even before the user drops `sherpa-onnx-X.Y.Z.aar` into android/app/libs/.
- * Once the AAR is present, this class loads `OfflineRecognizer` via the
- * official Kotlin bindings (package `com.k2fsa.sherpa.onnx`).
+ * sherpa-onnx Parakeet implementation using the official Kotlin bindings.
  */
 class ParakeetSherpaEngine(
     private val context: Context,
     private val modelStore: ModelStore,
 ) : SttEngine {
-    private var recognizer: Any? = null
+    private var recognizer: OfflineRecognizer? = null
 
     override fun isReady(): Boolean = recognizer != null
 
-    fun load(): Boolean {
+    override fun load(): Boolean {
         if (recognizer != null) return true
         if (!modelStore.isParakeetInstalled()) return false
         return try {
+            val started = System.currentTimeMillis()
             val dir = modelStore.parakeetDir().absolutePath
-            // sherpa-onnx Kotlin API (matches the prebuilt AAR):
-            //   val cfg = OfflineRecognizerConfig(...).apply { modelConfig.transducer.encoder = ... }
-            //   val recognizer = OfflineRecognizer(assetManager = null, config = cfg)
-            // We invoke via reflection to keep this file compilable without the
-            // AAR present. See README for the exact AAR drop.
-            val modelCfgClass = Class.forName("com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig")
-            val modelCfg = modelCfgClass.getDeclaredConstructor().newInstance()
-            modelCfgClass.getField("encoder").set(modelCfg, File(dir, "encoder.int8.onnx").absolutePath)
-            modelCfgClass.getField("decoder").set(modelCfg, File(dir, "decoder.int8.onnx").absolutePath)
-            modelCfgClass.getField("joiner").set(modelCfg, File(dir, "joiner.int8.onnx").absolutePath)
-
-            val omcClass = Class.forName("com.k2fsa.sherpa.onnx.OfflineModelConfig")
-            val omc = omcClass.getDeclaredConstructor().newInstance()
-            omcClass.getField("transducer").set(omc, modelCfg)
-            omcClass.getField("tokens").set(omc, File(dir, "tokens.txt").absolutePath)
-            omcClass.getField("modelType").set(omc, "nemo_transducer")
-            omcClass.getField("numThreads").set(omc, 2)
-
-            val recCfgClass = Class.forName("com.k2fsa.sherpa.onnx.OfflineRecognizerConfig")
-            val recCfg = recCfgClass.getDeclaredConstructor().newInstance()
-            recCfgClass.getField("modelConfig").set(recCfg, omc)
-
-            val recClass = Class.forName("com.k2fsa.sherpa.onnx.OfflineRecognizer")
-            val rec = recClass.getDeclaredConstructor(recCfgClass).newInstance(recCfg)
-            recognizer = rec
+            val transducer = OfflineTransducerModelConfig(
+                encoder = File(dir, "encoder.int8.onnx").absolutePath,
+                decoder = File(dir, "decoder.int8.onnx").absolutePath,
+                joiner = File(dir, "joiner.int8.onnx").absolutePath,
+            )
+            val modelConfig = OfflineModelConfig(
+                transducer = transducer,
+                tokens = File(dir, "tokens.txt").absolutePath,
+                modelType = "nemo_transducer",
+                numThreads = 4,
+                provider = "cpu",
+            )
+            val recognizerConfig = OfflineRecognizerConfig(modelConfig = modelConfig)
+            recognizer = OfflineRecognizer(null, recognizerConfig)
+            Log.i("NeelSpeak.STT", "Parakeet recognizer loaded in ${System.currentTimeMillis() - started} ms")
             true
         } catch (e: Throwable) {
             Log.e("NeelSpeak.STT", "Parakeet load failed: ${e.message}", e)
@@ -70,18 +63,15 @@ class ParakeetSherpaEngine(
     override suspend fun transcribe(samples: FloatArray, sampleRate: Int): String {
         if (!load()) return ""
         return try {
+            val started = System.currentTimeMillis()
             val rec = recognizer ?: return ""
-            val recClass = rec.javaClass
-            val stream = recClass.getMethod("createStream").invoke(rec)
-            val streamClass = stream!!.javaClass
-            streamClass.getMethod("acceptWaveform", FloatArray::class.java, Int::class.javaPrimitiveType)
-                .invoke(stream, samples, sampleRate)
-            recClass.getMethod("decode", streamClass).invoke(rec, stream)
-            val result = recClass.getMethod("getResult", streamClass).invoke(rec, stream)
-            val text = result?.javaClass?.getMethod("getText")?.invoke(result) as? String
-            // Release the stream
-            try { streamClass.getMethod("release").invoke(stream) } catch (_: Throwable) {}
-            text.orEmpty()
+            val stream = rec.createStream()
+            stream.acceptWaveform(samples, sampleRate)
+            rec.decode(stream)
+            val text = rec.getResult(stream).text
+            stream.release()
+            Log.i("NeelSpeak.STT", "Transcribed ${samples.size} samples in ${System.currentTimeMillis() - started} ms")
+            text
         } catch (e: Throwable) {
             Log.e("NeelSpeak.STT", "transcribe failed: ${e.message}", e)
             ""
@@ -90,7 +80,7 @@ class ParakeetSherpaEngine(
 
     override fun release() {
         try {
-            recognizer?.javaClass?.getMethod("release")?.invoke(recognizer)
+            recognizer?.release()
         } catch (_: Throwable) {}
         recognizer = null
     }

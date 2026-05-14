@@ -1,8 +1,10 @@
 package com.neelspeak.bridge
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import io.flutter.plugin.common.BinaryMessenger
@@ -41,8 +43,39 @@ class SystemChannel(private val host: Activity) {
                     )
                     result.success(current?.startsWith(host.packageName) == true)
                 }
+                "openUrlPreferringApp" -> {
+                    val url: String = call.argument("url") ?: return@setMethodCallHandler result.error("ARG", "url required", null)
+                    val pkg: String? = call.argument("package")
+                    val opened = openUrl(url, pkg)
+                    result.success(opened)
+                }
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /**
+     * Open [url] in [preferredPackage] if installed, else fall back to the
+     * default browser. Returns "app" / "browser" / "none".
+     */
+    private fun openUrl(url: String, preferredPackage: String?): String {
+        val uri = Uri.parse(url)
+        if (!preferredPackage.isNullOrEmpty()) {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(preferredPackage)
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                host.startActivity(intent)
+                return "app"
+            } catch (_: ActivityNotFoundException) { /* fall through */ }
+        }
+        val browser = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            host.startActivity(browser); "browser"
+        } catch (_: ActivityNotFoundException) { "none" }
     }
 }
