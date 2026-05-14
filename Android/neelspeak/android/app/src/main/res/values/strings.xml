@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NeelSpeak</string>
+    <string name="ime_subtype_label">NeelSpeak Voice</string>
+    <string name="hold_to_speak">Hold to speak</string>
+    <string name="state_idle">Hold to speak</string>
+    <string name="state_recording">Listening…</string>
+    <string name="state_transcribing">Transcribing…</string>
+    <string name="state_cleaning">Cleaning…</string>
+    <string name="state_setup">Open NeelSpeak to finish setup</string>
+</resources>
