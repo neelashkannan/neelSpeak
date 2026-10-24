@@ -11,6 +11,9 @@ final class AudioEngine {
     private var samples: [Float] = []
     private var capturing = false
 
+    /// Normalised input level (0…1) per captured buffer, delivered on the main queue.
+    var onLevel: ((Float) -> Void)?
+
     static let targetFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -65,6 +68,18 @@ final class AudioEngine {
         bufferQueue.async { [weak self] in
             self?.samples.append(contentsOf: chunk)
         }
+        if let onLevel, !chunk.isEmpty {
+            let level = Self.normalizedLevel(of: chunk)
+            DispatchQueue.main.async { onLevel(level) }
+        }
+    }
+
+    /// RMS mapped from roughly -50…-10 dBFS onto 0…1, which covers quiet to
+    /// loud speech on a laptop microphone.
+    private static func normalizedLevel(of chunk: [Float]) -> Float {
+        let meanSquare = chunk.reduce(Float(0)) { $0 + $1 * $1 } / Float(chunk.count)
+        let decibels = 10 * log10(max(meanSquare, 1e-10))
+        return min(1, max(0, (decibels + 50) / 40))
     }
 
     private func convertIfNeeded(buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {

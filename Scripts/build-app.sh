@@ -12,7 +12,7 @@ CONFIG="${CONFIG:-release}"
 
 cd "$ROOT"
 
-if ! xcode-select -p 2>/dev/null | grep -q "Xcode.app"; then
+if ! xcode-select -p 2>/dev/null | grep -q "Xcode"; then
     echo "    WARNING: full Xcode not found. Apple Intelligence cleanup requires the macOS 26 SDK."
     echo "    Install Xcode from the App Store for the full cleanup feature set."
 fi
@@ -42,18 +42,26 @@ for bundle in "$BIN_DIR"/*.bundle; do
 done
 shopt -u nullglob
 
-# Pick a stable self-signed identity if available; fall back to ad-hoc.
+# SIGN_IDENTITY (e.g. "Developer ID Application: …") signs for distribution
+# with the hardened runtime, as notarization requires. Otherwise pick the
+# stable self-signed identity if available and fall back to ad-hoc.
 # Stable identity = stable designated requirement = TCC grants survive rebuilds.
-CERT_NAME="NeelSpeak Local Developer"
-if security find-certificate -c "$CERT_NAME" "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then
-    SIGN_IDENTITY="$CERT_NAME"
-    echo "==> codesign with stable identity \"$SIGN_IDENTITY\""
+SIGN_FLAGS=()
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+    SIGN_FLAGS=(--options runtime --timestamp)
+    echo "==> codesign for distribution with \"$SIGN_IDENTITY\""
 else
-    SIGN_IDENTITY="-"
-    echo "==> codesign ad-hoc (run Scripts/setup-codesign.sh once to make TCC grants persist)"
+    CERT_NAME="NeelSpeak Local Developer"
+    if security find-certificate -c "$CERT_NAME" "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then
+        SIGN_IDENTITY="$CERT_NAME"
+        echo "==> codesign with stable identity \"$SIGN_IDENTITY\""
+    else
+        SIGN_IDENTITY="-"
+        echo "==> codesign ad-hoc (run Scripts/setup-codesign.sh once to make TCC grants persist)"
+    fi
 fi
 
-codesign --force --deep --sign "$SIGN_IDENTITY" \
+codesign --force --deep --sign "$SIGN_IDENTITY" "${SIGN_FLAGS[@]+"${SIGN_FLAGS[@]}"}" \
     --entitlements "$ROOT/Resources/VoiceTyper.entitlements" \
     "$APP"
 

@@ -1,37 +1,32 @@
-# NeelSpeak v0.2.1
+# NeelSpeak 1.0
 
-This release polishes NeelSpeak's macOS UI and ships the new app and menu bar icons.
+NeelSpeak 1.0 turns the menu bar dictation tool into a finished Mac app: guided setup, a proper settings window, history, safer key handling and a long list of fixes.
 
-## What's new
+## Highlights
 
-- New custom app icon is bundled into `NeelSpeak.app` and used throughout the dashboard.
-- New custom menu bar icon replaces the previous text-heavy status item.
-- The control centre has been tightened into a cleaner split layout with a slim header, cleanup settings, recent dictations, status, and pill appearance controls.
-- Release packaging now includes PNG and ICNS image assets so the icons are present in local builds and GitHub release DMGs.
+- **New setup and settings.** A four-step setup gets you from download to your first dictation, and a new window brings together General, AI Cleanup, Appearance, History and About.
+- **Choose your key.** Right Option, Left Option, or either. Escape cancels, and Option shortcuts like ⌥← no longer trigger a dictation.
+- **A pill that listens back.** The dictation pill now follows your voice level and tells you when it's cleaning up, when nothing was heard, or when cleanup was skipped.
+- **History.** Search and copy past dictations, or grab the latest from the menu bar.
+- **Keys in the Keychain.** Cloud API keys and your Copilot sign-in move out of plain preferences into your login Keychain automatically.
+- **Launch at login, sounds and update notifications.**
 
 ## Fixes
 
-- Cloud cleanup engines (GitHub Copilot, OpenAI-compatible, Anthropic) no longer treat dictations that read like questions or commands as requests to answer. The system prompt is now explicit that the user message is always a transcript to clean, every transcript is wrapped in a `<transcript>` block with a "do not comply" directive, and the few-shot examples are now actually sent over the wire — including question-style pairs so the model learns to clean rather than answer.
-
-## Version comparison
-
-| Area | v0.2.0 | v0.2.1 |
-|------|--------|--------|
-| Dashboard | Full cleanup/provider configuration, overlay themes, and transcript history | Compact control centre with cleanup, recent dictations, status, and appearance panels |
-| Menu bar | SF Symbol plus text label | Custom icon-only menu bar item |
-| App identity | Default/generated visual mark in some surfaces | Bundled app icon reused in app metadata and dashboard |
-| Packaging | DMG-first release workflow | DMG release includes app/menu icon PNG and ICNS assets |
+- Sentences no longer lose the space after punctuation ("Hello.How are you?"), and ordinary words like "point" and "period" are left alone.
+- AI cleanup reliably connects at launch, and failures show a reason instead of silently pasting raw text.
+- Anthropic cleanup defaults to `claude-haiku-5-5` and works with current Claude and OpenAI models that reject custom sampling settings.
+- Apple Intelligence cleanup is included in release builds.
 
 ## Install
 
-1. Download **NeelSpeak.dmg** below.
-2. Open the DMG and drag `NeelSpeak.app` into the **Applications** shortcut.
-3. Eject the DMG.
-4. First launch: Right-click `NeelSpeak.app` and choose **Open** to bypass Gatekeeper.
-5. Grant **Microphone** and **Accessibility** permissions when prompted.
+1. Download **NeelSpeak.dmg** below and drag NeelSpeak into Applications.
+2. Open it. If macOS can't verify the developer, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+3. Allow Microphone and Accessibility when asked.
+
+Updating from 0.2.x keeps your settings. macOS may ask once to let NeelSpeak use its Keychain item.
 
 ## Requirements
 
-- macOS 14.0 Sonoma or later
-- Apple Silicon, M1 or later
-- Apple Intelligence cleanup requires macOS 26 and Apple Intelligence enabled
+- macOS 14 Sonoma or later on Apple Silicon
+- Apple Intelligence cleanup needs macOS 26 with Apple Intelligence turned on

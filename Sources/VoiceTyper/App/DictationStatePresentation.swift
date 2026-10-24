@@ -25,19 +25,19 @@ extension DictationCoordinator.State {
     var detail: String {
         switch self {
         case .setupRequired:
-            return "Finish permissions and choose a speech model before dictation starts."
+            return "Grant permissions and download the speech model to start dictating."
         case .downloadingModel(let progress):
-            return "Downloading speech model \(Int(progress * 100))%. Keep NeelSpeak open until this finishes."
+            return "Downloading the speech model (\(Int(progress * 100))%). This happens once."
         case .warming:
-            return "Specializing and loading the speech model. This can take a moment after download."
+            return "Loading the speech model. The first launch after a download takes a little longer."
         case .idle:
-            return "Hold Option anywhere to dictate."
+            return "Hold the dictation key in any app, speak, and let go to paste."
         case .recording:
-            return "Speak naturally. Release to insert the text into the active app."
+            return "Speak naturally. Let go to paste into the active app."
         case .transcribing:
-            return "Converting speech to text and preparing to paste."
+            return "Turning your speech into text on this Mac."
         case .cleaning:
-            return "Local AI is removing fillers, stutters, and course corrections."
+            return "Removing fillers, stutters, and course corrections before pasting."
         case .error(let message):
             return message
         }

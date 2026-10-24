@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['Android/**', '**.md']
+  pull_request:
+    paths-ignore: ['Android/**', '**.md']
+
+jobs:
+  test:
+    name: Build & Test (macOS)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Build app bundle
+        run: bash Scripts/build-app.sh

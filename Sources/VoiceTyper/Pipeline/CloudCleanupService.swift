@@ -4,8 +4,8 @@ import os
 private let cloudLog = Logger(subsystem: "com.neelspeak.app", category: "cloud-cleanup")
 
 /// Stateless HTTP client that calls cloud LLM providers for transcript cleanup.
-/// Used by `LLMTranscriptCleaner` when the user selects `openAICompatible` or
-/// `anthropic` as the engine.
+/// Used by `LLMTranscriptCleaner` when the user selects `openAICompatible`,
+/// `githubCopilot` or `anthropic` as the engine.
 enum CloudCleanupService {
 
     enum Error: Swift.Error, CustomStringConvertible {
@@ -17,16 +17,36 @@ enum CloudCleanupService {
         var description: String {
             switch self {
             case .missingApiKey:
-                return "API key not configured. Open NeelSpeak settings and paste your key."
+                return "API key not configured. Open NeelSpeak and paste your key."
             case .badResponse(let code, let body):
-                return "HTTP \(code): \(body.prefix(200))"
+                let detail = CloudCleanupService.providerMessage(in: body) ?? String(body.prefix(160))
+                switch code {
+                case 401, 403:
+                    return "The provider rejected the API key (HTTP \(code)). \(detail)"
+                case 404:
+                    return "Model or endpoint not found (HTTP 404). \(detail)"
+                case 429:
+                    return "Rate limited by the provider (HTTP 429). \(detail)"
+                default:
+                    return "HTTP \(code): \(detail)"
+                }
             case .decoding(let msg):
-                return "Decode error: \(msg)"
+                return "Unexpected response: \(msg)"
             case .other(let msg):
                 return msg
             }
         }
     }
+
+    /// Request parameters some models refuse. Learned from a 400 the first time
+    /// a model rejects them, then remembered for the rest of the session.
+    private struct RequestQuirks: OptionSet, Sendable {
+        let rawValue: Int
+        static let omitTemperature = RequestQuirks(rawValue: 1 << 0)
+        static let useMaxCompletionTokens = RequestQuirks(rawValue: 1 << 1)
+    }
+
+    private static let learnedQuirks = OSAllocatedUnfairLock(initialState: [String: RequestQuirks]())
 
     // MARK: - OpenAI-compatible
 
@@ -41,45 +61,23 @@ enum CloudCleanupService {
         model: String
     ) async throws -> String {
         guard !apiKey.isEmpty else { throw Error.missingApiKey }
-
         let url = try buildURL(baseURL: baseURL, path: "/chat/completions")
-        var req = URLRequest(url: url, timeoutInterval: 15)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        let body: [String: Any] = [
-            "model": model,
-            "temperature": 0.1,
-            "max_tokens": maxOutputTokens(for: text),
-            "messages": buildChatMessages(text: text, mode: mode)
+        let headers = [
+            "Content-Type": "application/json",
+            "Authorization": "Bearer \(apiKey)"
         ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let started = Date()
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let elapsed = Date().timeIntervalSince(started)
-        guard let http = resp as? HTTPURLResponse else {
-            throw Error.other("Non-HTTP response")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.badResponse(http.statusCode, body)
-        }
-
-        // OpenAI shape: { choices: [ { message: { content: "..." } } ] }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.decoding("Unexpected JSON shape: \(body.prefix(200))")
-        }
-        cloudLog.info("openai-compat \(model, privacy: .public) \(elapsed, format: .fixed(precision: 2))s")
-        return content
+        return try await chatCompletion(url: url, headers: headers, model: model, text: text, mode: mode, label: "openai-compat")
     }
 
     // MARK: - GitHub Copilot
+
+    /// Headers Copilot's gateway expects from an editor integration — without
+    /// them it refuses requests.
+    private static let copilotEditorHeaders = [
+        "Editor-Version": "vscode/1.95.0",
+        "Editor-Plugin-Version": "copilot-chat/0.22.0",
+        "User-Agent": "GithubCopilot/1.155.0"
+    ]
 
     /// POST `/chat/completions` against the GitHub Copilot Chat API.
     /// `sessionToken` is the short-lived Copilot token from
@@ -93,41 +91,11 @@ enum CloudCleanupService {
         guard let url = URL(string: "https://api.githubcopilot.com/chat/completions") else {
             throw Error.other("Bad Copilot URL")
         }
-        var req = URLRequest(url: url, timeoutInterval: 15)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
-        // Copilot's gateway sniffs editor headers — without them it refuses requests.
-        req.setValue("vscode/1.95.0", forHTTPHeaderField: "Editor-Version")
-        req.setValue("copilot-chat/0.22.0", forHTTPHeaderField: "Editor-Plugin-Version")
-        req.setValue("GithubCopilot/1.155.0", forHTTPHeaderField: "User-Agent")
-        req.setValue("2025-01-01", forHTTPHeaderField: "Openai-Intent")
-
-        let body: [String: Any] = [
-            "model": model,
-            "temperature": 0.1,
-            "max_tokens": maxOutputTokens(for: text),
-            "messages": buildChatMessages(text: text, mode: mode)
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let started = Date()
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let elapsed = Date().timeIntervalSince(started)
-        guard let http = resp as? HTTPURLResponse else { throw Error.other("Non-HTTP response") }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.badResponse(http.statusCode, body)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.decoding("Unexpected JSON: \(body.prefix(200))")
-        }
-        cloudLog.info("copilot \(model, privacy: .public) \(elapsed, format: .fixed(precision: 2))s")
-        return content
+        var headers = copilotEditorHeaders
+        headers["Content-Type"] = "application/json"
+        headers["Authorization"] = "Bearer \(sessionToken)"
+        headers["Openai-Intent"] = "2025-01-01"
+        return try await chatCompletion(url: url, headers: headers, model: model, text: text, mode: mode, label: "copilot")
     }
 
     /// GET `/models` on the Copilot endpoint. Returns chat-capable model ids
@@ -138,10 +106,10 @@ enum CloudCleanupService {
         }
         var req = URLRequest(url: url, timeoutInterval: 15)
         req.httpMethod = "GET"
+        for (field, value) in copilotEditorHeaders {
+            req.setValue(value, forHTTPHeaderField: field)
+        }
         req.setValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
-        req.setValue("vscode/1.95.0", forHTTPHeaderField: "Editor-Version")
-        req.setValue("copilot-chat/0.22.0", forHTTPHeaderField: "Editor-Plugin-Version")
-        req.setValue("GithubCopilot/1.155.0", forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -185,15 +153,9 @@ enum CloudCleanupService {
         model: String
     ) async throws -> String {
         guard !apiKey.isEmpty else { throw Error.missingApiKey }
-
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw Error.other("Bad Anthropic URL")
         }
-        var req = URLRequest(url: url, timeoutInterval: 15)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
         var messages: [[String: Any]] = []
         for (userEx, asstEx) in mode.fewShotExamples {
@@ -202,35 +164,146 @@ enum CloudCleanupService {
         }
         messages.append(["role": "user", "content": wrapTranscript(text)])
 
-        let body: [String: Any] = [
-            "model": model,
-            "max_tokens": maxOutputTokens(for: text),
-            "temperature": 0.1,
-            "system": mode.systemPrompt,
-            "messages": messages
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
+        // Claude 4.7 and later reject custom sampling values and think by
+        // default, so they get low effort and room for that thinking instead.
+        let legacy = anthropicModelAcceptsTemperature(model)
         let started = Date()
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let elapsed = Date().timeIntervalSince(started)
-        guard let http = resp as? HTTPURLResponse else {
-            throw Error.other("Non-HTTP response")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.badResponse(http.statusCode, body)
+        let data = try await send(quirksKey: "anthropic:\(model)", allowedQuirks: .omitTemperature, label: "anthropic") { quirks in
+            var req = URLRequest(url: url, timeoutInterval: 15)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            var body: [String: Any] = [
+                "model": model,
+                "system": mode.systemPrompt,
+                "messages": messages
+            ]
+            if legacy {
+                body["max_tokens"] = maxOutputTokens(for: text)
+                if !quirks.contains(.omitTemperature) { body["temperature"] = 0.1 }
+            } else {
+                body["max_tokens"] = maxOutputTokens(for: text) + 1024
+                body["output_config"] = ["effort": "low"]
+            }
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            return req
         }
 
-        // Anthropic shape: { content: [ { type: "text", text: "..." } ] }
+        // Anthropic shape: { content: [ { type: "thinking", ... }, { type: "text", text: "..." } ] }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let content = json["content"] as? [[String: Any]],
               let firstText = content.first(where: { ($0["type"] as? String) == "text" })?["text"] as? String else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw Error.decoding("Unexpected JSON shape: \(body.prefix(200))")
+            throw Error.decoding(String(body.prefix(200)))
         }
-        cloudLog.info("anthropic \(model, privacy: .public) \(elapsed, format: .fixed(precision: 2))s")
+        cloudLog.info("anthropic \(model, privacy: .public) \(Date().timeIntervalSince(started), format: .fixed(precision: 2))s")
         return firstText
+    }
+
+    /// True for Claude models that still accept a custom `temperature`
+    /// (Claude 3.x and Claude 4.0–4.6, including dated snapshots).
+    static func anthropicModelAcceptsTemperature(_ model: String) -> Bool {
+        let patterns = [
+            #"^claude-(?:instant|2|3)"#,
+            #"^claude-(?:haiku|sonnet|opus)-4(?:-[0-6])?(?:-\d{8})?$"#
+        ]
+        return patterns.contains { model.range(of: $0, options: .regularExpression) != nil }
+    }
+
+    // MARK: - Shared request plumbing
+
+    /// Chat-completions call shared by the OpenAI-compatible and Copilot engines.
+    private static func chatCompletion(
+        url: URL,
+        headers: [String: String],
+        model: String,
+        text: String,
+        mode: CleanupMode,
+        label: String
+    ) async throws -> String {
+        let started = Date()
+        let data = try await send(
+            quirksKey: "\(url.host() ?? label):\(model)",
+            allowedQuirks: [.omitTemperature, .useMaxCompletionTokens],
+            label: label
+        ) { quirks in
+            var req = URLRequest(url: url, timeoutInterval: 15)
+            req.httpMethod = "POST"
+            for (field, value) in headers {
+                req.setValue(value, forHTTPHeaderField: field)
+            }
+            var body: [String: Any] = [
+                "model": model,
+                "messages": buildChatMessages(text: text, mode: mode)
+            ]
+            if !quirks.contains(.omitTemperature) { body["temperature"] = 0.1 }
+            let tokenField = quirks.contains(.useMaxCompletionTokens) ? "max_completion_tokens" : "max_tokens"
+            body[tokenField] = maxOutputTokens(for: text)
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            return req
+        }
+
+        // OpenAI shape: { choices: [ { message: { content: "..." } } ] }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw Error.decoding(String(body.prefix(200)))
+        }
+        cloudLog.info("\(label, privacy: .public) \(model, privacy: .public) \(Date().timeIntervalSince(started), format: .fixed(precision: 2))s")
+        return content
+    }
+
+    /// Sends the request built for the model's known quirks. If the provider
+    /// rejects `temperature` or `max_tokens` for this model, retries once
+    /// without it and remembers that for later dictations.
+    private static func send(
+        quirksKey: String,
+        allowedQuirks: RequestQuirks,
+        label: String,
+        makeRequest: (RequestQuirks) throws -> URLRequest
+    ) async throws -> Data {
+        var quirks = learnedQuirks.withLock { $0[quirksKey] ?? [] }
+        var retried = false
+        while true {
+            let (data, resp) = try await URLSession.shared.data(for: try makeRequest(quirks))
+            guard let http = resp as? HTTPURLResponse else { throw Error.other("Non-HTTP response") }
+            if (200..<300).contains(http.statusCode) { return data }
+
+            let body = String(data: data, encoding: .utf8) ?? ""
+            if !retried, http.statusCode == 400 {
+                let lowered = body.lowercased()
+                var learned: RequestQuirks = []
+                if lowered.contains("temperature") { learned.insert(.omitTemperature) }
+                if lowered.contains("max_tokens") || lowered.contains("max_completion_tokens") {
+                    learned.insert(.useMaxCompletionTokens)
+                }
+                learned = learned.intersection(allowedQuirks).subtracting(quirks)
+                if !learned.isEmpty {
+                    quirks.formUnion(learned)
+                    let remembered = quirks
+                    learnedQuirks.withLock { $0[quirksKey] = remembered }
+                    cloudLog.info("\(label, privacy: .public): retrying with adjusted parameters (\(remembered.rawValue))")
+                    retried = true
+                    continue
+                }
+            }
+            throw Error.badResponse(http.statusCode, body)
+        }
+    }
+
+    /// Pulls the human-readable message out of an OpenAI- or Anthropic-style error body.
+    static func providerMessage(in body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
+            return message
+        }
+        if let message = json["message"] as? String { return message }
+        if let error = json["error"] as? String { return error }
+        return nil
     }
 
     // MARK: - Helpers
@@ -238,7 +311,7 @@ enum CloudCleanupService {
     private static func buildURL(baseURL: String, path: String) throws -> URL {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: "\(trimmed)\(path)") else {
+        guard let url = URL(string: "\(trimmed)\(path)"), url.scheme != nil else {
             throw Error.other("Bad base URL: \(baseURL)")
         }
         return url
@@ -331,7 +404,7 @@ struct OpenAICompatPreset: Identifiable, Hashable {
         id: "opencode",
         displayName: "OpenCode (local server)",
         baseURL: "http://localhost:4096/v1",
-        defaultModel: "anthropic/claude-haiku-4-5",
+        defaultModel: "anthropic/claude-haiku-5-5",
         apiKeyHint: "Run: opencode serve. Uses providers configured in your opencode config. Key value is ignored."
     )
 

@@ -8,10 +8,19 @@ final class OverlayViewModel: ObservableObject {
     @Published var isVisible: Bool = false
     @Published var mode: ListeningOverlayView.Mode = .listening
     @Published var startedAt: Date = Date()
+    /// Smoothed microphone level, 0…1.
+    @Published var level: Double = 0
     let themeStore: OverlayThemeStore
 
     init(themeStore: OverlayThemeStore) {
         self.themeStore = themeStore
+    }
+
+    func ingest(level newLevel: Float) {
+        let target = Double(newLevel)
+        // Rise quickly with the voice, fall back gently between words.
+        let factor = target > level ? 0.55 : 0.18
+        level += (target - level) * factor
     }
 }
 
@@ -22,11 +31,16 @@ final class ListeningOverlayController {
     private let panel: NSPanel
     private let viewModel: OverlayViewModel
     private var currentState: DictationCoordinator.State = .setupRequired
-    private var hotkeyPreviewActive = false
+    private var pendingReveal: DispatchWorkItem?
+    private var pendingHide: DispatchWorkItem?
 
     // Panel is larger than the visual pill so shaped shadows have
     // room to bleed without being clipped by the window edge.
     private static let panelSize = NSSize(width: 420, height: 96)
+    /// Delay before the pill appears for a new recording, so a hold that
+    /// immediately becomes an Option shortcut never flashes it.
+    private static let revealDelay: TimeInterval = 0.12
+    private static let noticeDuration: TimeInterval = 1.8
 
     init(themeStore: OverlayThemeStore) {
         viewModel = OverlayViewModel(themeStore: themeStore)
@@ -55,6 +69,7 @@ final class ListeningOverlayController {
         panel.isMovable = false
         // Mouse events pass through the transparent areas of the panel.
         panel.ignoresMouseEvents = true
+        panel.setAccessibilityElement(false)
 
         positionPanel()
         panel.orderFrontRegardless()
@@ -65,36 +80,57 @@ final class ListeningOverlayController {
 
         switch state {
         case .recording:
-            hotkeyPreviewActive = true
-            if !viewModel.isVisible { viewModel.startedAt = Date() }
-            show(mode: .listening)
-        case .transcribing, .cleaning:
-            hotkeyPreviewActive = false
+            viewModel.level = 0
+            viewModel.startedAt = Date()
+            scheduleReveal()
+        case .transcribing:
+            cancelPendingReveal()
             show(mode: .transcribing)
+        case .cleaning:
+            show(mode: .cleaning)
         default:
-            if hotkeyPreviewActive {
-                show(mode: .listening)
-            } else {
-                hide()
-            }
-        }
-    }
-
-    func update(hotkeyEvent: HotkeyManager.Event) {
-        switch hotkeyEvent {
-        case .pressed:
-            hotkeyPreviewActive = true
-            if !viewModel.isVisible { viewModel.startedAt = Date() }
-            show(mode: .listening)
-        case .released:
-            hotkeyPreviewActive = false
-            if currentStateKeepsOverlayVisible { return }
+            cancelPendingReveal()
+            // Let a notice raised alongside this state change finish showing.
+            if case .notice = viewModel.mode, viewModel.isVisible { return }
             hide()
         }
     }
 
+    func update(level: Float) {
+        guard case .recording = currentState else { return }
+        viewModel.ingest(level: level)
+    }
+
+    func show(notice: DictationCoordinator.Notice) {
+        cancelPendingReveal()
+        show(mode: .notice(notice))
+        let hide = DispatchWorkItem { [weak self] in
+            guard let self, case .notice = self.viewModel.mode else { return }
+            self.hide()
+        }
+        pendingHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.noticeDuration, execute: hide)
+    }
+
+    private func scheduleReveal() {
+        cancelPendingReveal()
+        let reveal = DispatchWorkItem { [weak self] in
+            guard let self, case .recording = self.currentState else { return }
+            self.show(mode: .listening)
+        }
+        pendingReveal = reveal
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.revealDelay, execute: reveal)
+    }
+
+    private func cancelPendingReveal() {
+        pendingReveal?.cancel()
+        pendingReveal = nil
+    }
+
     private func show(mode: ListeningOverlayView.Mode) {
-        positionPanel()
+        pendingHide?.cancel()
+        pendingHide = nil
+        if !viewModel.isVisible { positionPanel() }
         panel.orderFrontRegardless()
         withAnimation(.spring(response: 0.38, dampingFraction: 0.76)) {
             viewModel.mode = mode
@@ -103,17 +139,10 @@ final class ListeningOverlayController {
     }
 
     private func hide() {
+        pendingHide?.cancel()
+        pendingHide = nil
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             viewModel.isVisible = false
-        }
-    }
-
-    private var currentStateKeepsOverlayVisible: Bool {
-        switch currentState {
-        case .recording, .transcribing, .cleaning:
-            return true
-        default:
-            return false
         }
     }
 
@@ -142,6 +171,8 @@ struct ListeningOverlayView: View {
     enum Mode: Equatable {
         case listening
         case transcribing
+        case cleaning
+        case notice(DictationCoordinator.Notice)
     }
 
     @ObservedObject var viewModel: OverlayViewModel
@@ -189,19 +220,36 @@ private struct PillView: View {
             }
 
             Group {
-                TimelineView(.animation) { tl in
-                    ListeningContent(startedAt: viewModel.startedAt, accent: theme.borderColors[0], tick: tl.date.timeIntervalSinceReferenceDate)
+                switch viewModel.mode {
+                case .listening:
+                    TimelineView(.animation) { tl in
+                        ListeningContent(
+                            startedAt: viewModel.startedAt,
+                            level: viewModel.level,
+                            accent: theme.borderColors[0],
+                            tick: tl.date.timeIntervalSinceReferenceDate
+                        )
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                case .transcribing:
+                    StatusContent(accent: accent, symbol: nil, title: "Transcribing…")
+                        .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                case .cleaning:
+                    StatusContent(accent: accent, symbol: "wand.and.stars", title: "Cleaning up…")
+                        .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                case .notice(let notice):
+                    NoticeContent(notice: notice, accent: accent)
+                        .transition(.opacity.combined(with: .scale(scale: 0.88)))
                 }
-                .opacity(viewModel.mode == .listening ? 1 : 0)
-                .scaleEffect(viewModel.mode == .listening ? 1 : 0.88)
-
-                TranscribingContent(accent: theme.borderColors[min(2, theme.borderColors.count - 1)])
-                    .opacity(viewModel.mode == .transcribing ? 1 : 0)
-                    .scaleEffect(viewModel.mode == .transcribing ? 1 : 0.88)
             }
             .animation(.easeInOut(duration: 0.22), value: viewModel.mode)
             .frame(width: pillW, height: pillH)
         }
+        .accessibilityHidden(true)
+    }
+
+    private var accent: Color {
+        theme.borderColors[min(2, theme.borderColors.count - 1)]
     }
 }
 
@@ -209,6 +257,7 @@ private struct PillView: View {
 
 private struct ListeningContent: View {
     let startedAt: Date
+    let level: Double
     let accent: Color
     let tick: TimeInterval
 
@@ -224,8 +273,8 @@ private struct ListeningContent: View {
                     .foregroundStyle(accent)
             }
 
-            CompactWaveform(tick: tick, color: accent)
-                .frame(width: 90, height: 20)
+            CompactWaveform(tick: tick, level: level, color: accent)
+                .frame(width: 120, height: 24)
 
             Spacer(minLength: 0)
 
@@ -242,18 +291,64 @@ private struct ListeningContent: View {
     }
 }
 
-// MARK: - Transcribing Content
+// MARK: - Working / Notice Content
 
-private struct TranscribingContent: View {
+private struct StatusContent: View {
     let accent: Color
+    let symbol: String?
+    let title: String
 
     var body: some View {
         HStack(spacing: 12) {
-            PulsingRing(color: accent)
-                .frame(width: 22, height: 22)
-            Text("Transcribing…")
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .symbolEffect(.pulse, options: .repeating)
+                    .frame(width: 22, height: 22)
+            } else {
+                PulsingRing(color: accent)
+                    .frame(width: 22, height: 22)
+            }
+            Text(title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.85))
+                .foregroundStyle(Color.white.opacity(0.88))
+        }
+    }
+}
+
+private struct NoticeContent: View {
+    let notice: DictationCoordinator.Notice
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(accent)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.88))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private var symbol: String {
+        switch notice {
+        case .noSpeech: return "waveform.slash"
+        case .notReady: return "hourglass"
+        case .microphoneUnavailable: return "mic.slash.fill"
+        case .cleanupSkipped: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var title: String {
+        switch notice {
+        case .noSpeech: return "No speech detected"
+        case .notReady(let reason): return reason
+        case .microphoneUnavailable: return "Microphone unavailable"
+        case .cleanupSkipped: return "Pasted without cleanup"
         }
     }
 }
@@ -309,11 +404,12 @@ private struct PillBackground: View {
 
 private struct CompactWaveform: View {
     let tick: TimeInterval
+    let level: Double
     let color: Color
 
     var body: some View {
         Canvas { context, size in
-            let bars = 18
+            let bars = 22
             let centerY = size.height / 2
             let step = size.width / CGFloat(bars - 1)
             for index in 0..<bars {
@@ -322,8 +418,10 @@ private struct CompactWaveform: View {
                 let envelope = pow(1 - distanceFromCenter, 1.4)
                 let motion = (sin(tick * 8.3 + Double(index) * 0.68) + 1) / 2
                 let secondary = (sin(tick * 3.1 - Double(index) * 0.25) + 1) / 2
-                let maxBarHeight = size.height * 0.82
-                let height = 2 + maxBarHeight * envelope * (0.35 + 0.65 * motion) + secondary * 2 * envelope
+                let maxBarHeight = size.height * 0.9
+                // Bars idle as a low ripple and grow with the live input level.
+                let energy = 0.12 + 0.88 * level
+                let height = 2 + maxBarHeight * envelope * energy * (0.45 + 0.55 * motion) + secondary * 1.5 * envelope
                 let x = CGFloat(index) * step
                 var path = Path()
                 path.move(to: CGPoint(x: x, y: centerY - CGFloat(height / 2)))

@@ -16,11 +16,20 @@ actor LLMTranscriptCleaner {
         case failed(String)
     }
 
+    /// What `clean` produced. `issue` is set when cleanup was requested but
+    /// the raw transcript had to be used instead, so the UI can say why.
+    struct CleanupResult: Sendable {
+        let text: String
+        let issue: String?
+    }
+
     struct CloudConfig: Sendable, Equatable {
+        static let defaultAnthropicModel = "claude-haiku-5-5"
+
         var openAIBaseURL: String = OpenAICompatPreset.githubModels.baseURL
         var openAIModel: String = OpenAICompatPreset.githubModels.defaultModel
         var openAIKey: String = ""
-        var anthropicModel: String = "claude-haiku-4-5"
+        var anthropicModel: String = defaultAnthropicModel
         var anthropicKey: String = ""
         var copilotModel: String = "gpt-4o-mini"
         var copilotOAuthToken: String = ""  // ghu_... from device flow
@@ -43,10 +52,14 @@ actor LLMTranscriptCleaner {
     }
 
     func setCloudConfig(_ config: CloudConfig) {
+        guard config != cloudConfig else { return }
+        if config.copilotOAuthToken != cloudConfig.copilotOAuthToken {
+            copilotSessionToken = nil
+            copilotSessionExpiry = nil
+        }
         cloudConfig = config
-        // Invalidate copilot session if OAuth token changed
-        copilotSessionToken = nil
-        copilotSessionExpiry = nil
+        // Keys or models changed: the engine has to be checked again.
+        if engine.isCloud { state = .unloaded }
     }
 
     func prepare(progress: @escaping @Sendable (Double) -> Void) async {
@@ -149,30 +162,47 @@ actor LLMTranscriptCleaner {
         copilotSessionExpiry = nil
     }
 
-    func clean(_ text: String, mode: CleanupMode) async -> String {
+    /// `allowShortcut` skips the model for transcripts with no obvious
+    /// disfluencies in conservative mode; tests turn it off to hit the engine.
+    func clean(_ text: String, mode: CleanupMode, allowShortcut: Bool = true) async -> CleanupResult {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard mode != .off, !trimmed.isEmpty else { return text }
-        guard case .ready = state else {
+        guard mode != .off, !trimmed.isEmpty else { return CleanupResult(text: text, issue: nil) }
+        switch state {
+        case .ready:
+            break
+        case .unsupported(let message), .failed(let message):
+            return CleanupResult(text: text, issue: message)
+        case .unloaded, .loading:
             cleanerLog.info("clean called but state not ready, returning raw text")
-            return text
+            return CleanupResult(text: text, issue: "\(engine.displayName) wasn't ready yet.")
         }
 
-        if mode == .conservative && Self.looksClean(trimmed) {
+        if allowShortcut && mode == .conservative && Self.looksClean(trimmed) {
             cleanerLog.info("clean: fast-path bypass (no disfluencies detected)")
-            return trimmed
+            return CleanupResult(text: trimmed, issue: nil)
         }
 
         let started = Date()
-        let result: String
-        switch engine {
-        case .foundationModels:
-            result = await cleanWithFoundationModels(trimmed, mode: mode) ?? text
-        case .openAICompatible:
-            result = await cleanWithOpenAICompatible(trimmed, mode: mode) ?? text
-        case .anthropic:
-            result = await cleanWithAnthropic(trimmed, mode: mode) ?? text
-        case .githubCopilot:
-            result = await cleanWithCopilot(trimmed, mode: mode) ?? text
+        let result: CleanupResult
+        do {
+            let cleaned: String
+            switch engine {
+            case .foundationModels:
+                cleaned = try await cleanWithFoundationModels(trimmed, mode: mode)
+            case .openAICompatible:
+                cleaned = try await cleanWithOpenAICompatible(trimmed, mode: mode)
+            case .anthropic:
+                cleaned = try await cleanWithAnthropic(trimmed, mode: mode)
+            case .githubCopilot:
+                cleaned = try await cleanWithCopilot(trimmed, mode: mode)
+            }
+            let sanitized = sanitizeOutput(cleaned, original: trimmed)
+            result = sanitized.isEmpty
+                ? CleanupResult(text: text, issue: "\(engine.displayName) returned an empty response.")
+                : CleanupResult(text: sanitized, issue: nil)
+        } catch {
+            cleanerLog.error("clean(\(self.engine.rawValue, privacy: .public)) failed: \(String(describing: error), privacy: .public)")
+            result = CleanupResult(text: text, issue: String(describing: error))
         }
         let elapsed = Date().timeIntervalSince(started)
         cleanerLog.info("clean(\(self.engine.rawValue, privacy: .public), \(mode.rawValue, privacy: .public)) took \(elapsed, format: .fixed(precision: 2))s")
@@ -193,29 +223,22 @@ actor LLMTranscriptCleaner {
         return true
     }
 
-    private func cleanWithFoundationModels(_ text: String, mode: CleanupMode) async -> String? {
+    private func cleanWithFoundationModels(_ text: String, mode: CleanupMode) async throws -> String {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
-            do {
-                let instructions = Self.foundationModelsInstructions(for: mode)
-                let session = LanguageModelSession(instructions: { instructions })
-                let prompt = "Transcript: \(text)\nCleaned:"
-                let maxTokens = max(32, min(160, text.count / 3 + 24))
-                let options = GenerationOptions(
-                    sampling: .greedy,
-                    temperature: 0.0,
-                    maximumResponseTokens: maxTokens
-                )
-                let response = try await session.respond(to: prompt, options: options)
-                let output = sanitizeOutput(response.content, original: text)
-                return output.isEmpty ? nil : output
-            } catch {
-                cleanerLog.error("cleanWithFoundationModels failed: \(String(describing: error))")
-                return nil
-            }
+            let instructions = Self.foundationModelsInstructions(for: mode)
+            let session = LanguageModelSession(instructions: { instructions })
+            let prompt = "Transcript: \(text)\nCleaned:"
+            let maxTokens = max(32, min(160, text.count / 3 + 24))
+            #if compiler(>=6.4)
+            let options = GenerationOptions(samplingMode: .greedy, temperature: 0.0, maximumResponseTokens: maxTokens)
+            #else
+            let options = GenerationOptions(sampling: .greedy, temperature: 0.0, maximumResponseTokens: maxTokens)
+            #endif
+            return try await session.respond(to: prompt, options: options).content
         }
         #endif
-        return nil
+        throw CloudCleanupService.Error.other("Apple Intelligence requires macOS 26 or later.")
     }
 
     private static func foundationModelsInstructions(for mode: CleanupMode) -> String {
@@ -245,63 +268,44 @@ actor LLMTranscriptCleaner {
         }
     }
 
-    private func cleanWithOpenAICompatible(_ text: String, mode: CleanupMode) async -> String? {
-        do {
-            let raw = try await CloudCleanupService.cleanWithOpenAICompatible(
-                text: text,
-                mode: mode,
-                baseURL: cloudConfig.openAIBaseURL,
-                apiKey: cloudConfig.openAIKey,
-                model: cloudConfig.openAIModel
-            )
-            let cleaned = sanitizeOutput(raw, original: text)
-            return cleaned.isEmpty ? nil : cleaned
-        } catch {
-            cleanerLog.error("cleanWithOpenAICompatible failed: \(String(describing: error))")
-            return nil
-        }
+    private func cleanWithOpenAICompatible(_ text: String, mode: CleanupMode) async throws -> String {
+        try await CloudCleanupService.cleanWithOpenAICompatible(
+            text: text,
+            mode: mode,
+            baseURL: cloudConfig.openAIBaseURL,
+            apiKey: cloudConfig.openAIKey,
+            model: cloudConfig.openAIModel
+        )
     }
 
-    private func cleanWithAnthropic(_ text: String, mode: CleanupMode) async -> String? {
-        do {
-            let raw = try await CloudCleanupService.cleanWithAnthropic(
-                text: text,
-                mode: mode,
-                apiKey: cloudConfig.anthropicKey,
-                model: cloudConfig.anthropicModel
-            )
-            let cleaned = sanitizeOutput(raw, original: text)
-            return cleaned.isEmpty ? nil : cleaned
-        } catch {
-            cleanerLog.error("cleanWithAnthropic failed: \(String(describing: error))")
-            return nil
-        }
+    private func cleanWithAnthropic(_ text: String, mode: CleanupMode) async throws -> String {
+        try await CloudCleanupService.cleanWithAnthropic(
+            text: text,
+            mode: mode,
+            apiKey: cloudConfig.anthropicKey,
+            model: cloudConfig.anthropicModel
+        )
     }
 
-    private func cleanWithCopilot(_ text: String, mode: CleanupMode) async -> String? {
-        do {
-            // Refresh session token if expired or absent
-            if copilotSessionToken == nil || (copilotSessionExpiry ?? Date.distantPast) < Date().addingTimeInterval(60) {
-                let session = try await CopilotAuthService.fetchSessionToken(
-                    oauthToken: cloudConfig.copilotOAuthToken
-                )
-                copilotSessionToken = session.token
-                copilotSessionExpiry = session.expiresAt
-                cleanerLog.info("Refreshed Copilot session token")
-            }
-            guard let token = copilotSessionToken else { return nil }
-            let raw = try await CloudCleanupService.cleanWithCopilot(
-                text: text,
-                mode: mode,
-                sessionToken: token,
-                model: cloudConfig.copilotModel
+    private func cleanWithCopilot(_ text: String, mode: CleanupMode) async throws -> String {
+        // Refresh session token if expired or absent
+        if copilotSessionToken == nil || (copilotSessionExpiry ?? Date.distantPast) < Date().addingTimeInterval(60) {
+            let session = try await CopilotAuthService.fetchSessionToken(
+                oauthToken: cloudConfig.copilotOAuthToken
             )
-            let cleaned = sanitizeOutput(raw, original: text)
-            return cleaned.isEmpty ? nil : cleaned
-        } catch {
-            cleanerLog.error("cleanWithCopilot failed: \(String(describing: error))")
-            return nil
+            copilotSessionToken = session.token
+            copilotSessionExpiry = session.expiresAt
+            cleanerLog.info("Refreshed Copilot session token")
         }
+        guard let token = copilotSessionToken else {
+            throw CloudCleanupService.Error.other("GitHub Copilot session expired. Sign in again.")
+        }
+        return try await CloudCleanupService.cleanWithCopilot(
+            text: text,
+            mode: mode,
+            sessionToken: token,
+            model: cloudConfig.copilotModel
+        )
     }
 
     private func sanitizeOutput(_ raw: String, original: String) -> String {

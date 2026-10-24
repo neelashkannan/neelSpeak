@@ -1,144 +1,107 @@
 # NeelSpeak
 
-> A free, open-source voice-to-text dictation app for macOS — with on-device transcription and optional AI cleanup via local and cloud engines.
+> Free, open-source voice typing for macOS. Hold a key, speak, let go — your words appear wherever you're typing. Transcription runs on your Mac; AI cleanup is optional.
 
 [![Latest Release](https://img.shields.io/github/v/release/neelashkannan/neelSpeak?label=Download&style=for-the-badge)](https://github.com/neelashkannan/neelSpeak/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-blue?style=for-the-badge&logo=apple)](https://github.com/neelashkannan/neelSpeak/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
----
-
-## What is NeelSpeak?
-
-NeelSpeak is a lightweight macOS menu-bar app that lets you dictate text into **any application** using a global hotkey. Hold **Right Option**, speak, and release — your words are transcribed on-device via [NVIDIA Parakeet](https://github.com/FluidInference/FluidAudio) and pasted wherever your cursor is.
-
-Optionally, an AI cleanup stage removes fillers, stutters, and course corrections before the text lands. You choose the engine: fully on-device Apple Intelligence, a local Ollama server, or supported cloud cleanup providers.
-
-**Current release:** `v0.2.1`
+**Current release:** `v1.0.0`
 
 ---
+
+## What it does
+
+NeelSpeak lives in your menu bar. Hold **Right Option** (configurable) in any app, speak, and let go: the text is transcribed on-device by [NVIDIA Parakeet](https://github.com/FluidInference/FluidAudio) and pasted at your cursor. Your clipboard is restored afterwards.
+
+An optional AI cleanup pass removes "um", "uh", stutters and false starts before the text lands. Use Apple Intelligence to keep everything on your Mac, or a cloud provider for speed.
 
 ## Features
 
-- 🎙️ **Hold Right Option** to dictate — release to paste
-- 🤖 **On-device STT** via [FluidAudio](https://github.com/FluidInference/FluidAudio) (NVIDIA Parakeet TDT v3)
-- ✨ **AI transcript cleanup** — removes fillers, stutters, and course corrections
-- ⚡ **Apple Silicon native** (arm64)
-- 🖥️ **Menu bar app** — lives quietly in your status bar
-- 🧭 **Custom app + menu bar icons** for a more polished macOS presence
-- 🎨 **Listening overlay** with customisable themes
-- 🧩 **Compact control centre** for cleanup, status, appearance, and recent dictations
-- 📋 **Transcript history** in the dashboard window
-- 🆓 **Free and open-source**
+- **Hold to talk, anywhere** — Right Option, Left Option, or either. Press Escape or any other key while holding to cancel, so Option shortcuts keep working.
+- **On-device speech recognition** — NVIDIA Parakeet TDT v3 (25 European languages) on the Apple Neural Engine.
+- **Live dictation pill** — shows your voice level while you speak, then *Transcribing…* and *Cleaning up…*, and tells you when nothing was heard.
+- **Optional AI cleanup** — Apple Intelligence, GitHub Copilot, any OpenAI-compatible API, or Anthropic Claude, with a built-in "try it" box.
+- **Smart formatting** — spoken addresses and symbols ("google dot com", "john at sign gmail dot com", "comma", "question mark") without mangling ordinary sentences.
+- **History** — searchable list of past dictations with one-click copy, kept only on your Mac (or turned off).
+- **Polished Mac app** — guided setup, launch at login, optional start/stop sounds, update notifications, light and dark mode.
+- **Private by design** — API keys live in your Keychain; nothing leaves your Mac unless you pick a cloud cleanup engine.
 
----
+## Install
 
-## Transcript Cleanup Engines
+1. Download **NeelSpeak.dmg** from the [latest release](https://github.com/neelashkannan/neelSpeak/releases/latest).
+2. Open it and drag **NeelSpeak** into **Applications**.
+3. Open NeelSpeak. If macOS says it can't verify the developer, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (only needed once for builds that aren't notarized).
+4. Follow the setup: allow **Microphone** and **Accessibility**, download the speech model (about 460 MB, once), and try a dictation.
 
-Cleanup is optional. When enabled, a lightweight LLM pass removes _"um"_, _"uh"_, stutters, repetitions, and course corrections before the text is pasted. Four engines are supported:
+### Requirements
 
-| Engine | Availability | Latency | Data leaves your Mac? |
-|--------|-------------|---------|----------------------|
-| **Apple Intelligence** | macOS 26+, Apple Intelligence enabled | ~1–2 s | ❌ Never |
-| **GitHub Copilot** | Active Copilot subscription, OAuth sign-in | ~300 ms | ✅ Sent to GitHub |
-| **OpenAI-compatible** | API key or local server | ~300 ms | Depends on provider |
-| **Anthropic Claude** | Anthropic API key | ~250 ms | ✅ Sent to Anthropic |
+| | Minimum |
+|---|---|
+| macOS | 14 Sonoma |
+| Mac | Apple Silicon (M1 or later) |
+| Apple Intelligence cleanup | macOS 26 with Apple Intelligence turned on |
 
-### OpenAI-compatible presets
+## Using NeelSpeak
 
-The OpenAI-compatible engine ships with one-click presets for common providers:
+1. Click where you want to type.
+2. Hold **Right Option**, speak, and let go.
+3. The text is pasted. Missed it? Choose **Copy Last Dictation** from the menu bar.
 
-| Preset | Notes |
-|--------|-------|
-| **GitHub Models** (default) | Free tier, GitHub PAT (no scopes needed) |
-| **OpenAI** | `sk-...` key from platform.openai.com |
-| **OpenRouter** | Access hundreds of models with one key |
-| **Groq** | Very fast inference, `gsk_...` key |
-| **Ollama** | Fully local — `http://localhost:11434/v1`, no API key needed |
-| **OpenCode** | Local OpenCode server (`opencode serve`) |
-| **Custom** | Any OpenAI-compatible base URL |
+Open the menu bar icon for settings, history, launch at login and updates.
 
-### Cleanup modes
+### AI cleanup
+
+| Engine | Where it runs | Notes |
+|--------|---------------|-------|
+| **Apple Intelligence** | On your Mac | macOS 26+. No account needed. |
+| **GitHub Copilot** | GitHub | Sign in with your Copilot subscription; pick any chat model it offers. |
+| **OpenAI-compatible** | Your provider | Presets for GitHub Models, OpenAI, OpenRouter, Groq, Ollama (local) and OpenCode (local). |
+| **Anthropic Claude** | Anthropic | Default model `claude-haiku-5-5`. |
 
 | Mode | What it does |
 |------|-------------|
-| **Off** | Paste the raw transcript exactly as spoken |
-| **Conservative** | Remove fillers, stutters, repetitions, and course corrections only |
-| **Aggressive** | All of the above, plus tighten run-on sentences and fix spoken-word grammar |
+| **Off** | Paste exactly what was said. |
+| **Conservative** | Remove fillers, stutters, repetitions and course corrections. |
+| **Aggressive** | Also tighten run-on sentences and fix spoken-grammar slips. |
 
----
+If a cleanup engine fails (bad key, no network), NeelSpeak pastes your words as transcribed and shows why in the pill and in **AI Cleanup**.
 
-## Download
+## Privacy
 
-Head to the [**Releases page**](https://github.com/neelashkannan/neelSpeak/releases) to download the latest `.dmg`.
+- Speech is recorded only while you hold the dictation key and is transcribed on your Mac.
+- With a cloud cleanup engine, the transcript text (never audio) is sent to that provider.
+- API keys and the Copilot sign-in token are stored in your login Keychain.
+- History is stored in `~/Library/Application Support/NeelSpeak/History.json`, readable only by you. Turn it off or clear it in **History**.
+- The update check contacts the GitHub releases API and sends nothing about you.
 
-1. Download `NeelSpeak.dmg` from the latest release
-2. Open the DMG and drag `NeelSpeak.app` into the **Applications** shortcut
-3. Eject the DMG
-4. Right-click → Open (first launch only, to bypass Gatekeeper)
-5. Grant **Microphone** and **Accessibility** permissions when prompted
+## Build from source
 
----
-
-## Requirements
-
-| Requirement | Minimum |
-|-------------|---------|
-| macOS | 14.0 (Sonoma) |
-| Architecture | Apple Silicon (M1 or later) |
-| Apple Intelligence cleanup | macOS 26 + Apple Intelligence enabled |
-
----
-
-## Build from Source
-
-> **Full Xcode is required** (not just Command Line Tools) — install from the Mac App Store, then:
->
-> ```bash
-> sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-> ```
+Xcode 26 or later is recommended (it includes the Apple Intelligence SDK). Command Line Tools also work, without Apple Intelligence cleanup.
 
 ```bash
 git clone https://github.com/neelashkannan/neelSpeak.git
 cd neelSpeak
+bash Scripts/setup-codesign.sh   # once: stable local signing so permissions survive rebuilds
 bash Scripts/build-app.sh
 open NeelSpeak.app
 ```
 
-For a full reinstall that resets permissions:
+Run the tests with `swift test`. To try the pipeline on an audio file without the hotkey:
 
 ```bash
-bash Scripts/redeploy-app.sh
+NeelSpeak.app/Contents/MacOS/NeelSpeak --transcribe recording.m4a --cleanup conservative
 ```
 
----
+### Releasing
 
-## Usage
+Push a `v*` tag. The release workflow runs the tests, builds the app, packages `NeelSpeak.dmg` with a SHA-256 checksum and publishes it with `RELEASE_NOTES.md`. If these repository secrets are set, it also signs with Developer ID and notarizes:
 
-1. Launch NeelSpeak from your Applications folder
-2. Complete the one-time setup (grant Microphone + Accessibility permissions, download the Parakeet model)
-3. Click anywhere you want to type
-4. **Hold Right Option** → speak → **release** to paste the transcription
-5. *(Optional)* Open the dashboard to configure cleanup engine and mode
-
----
-
-## GitHub Copilot Setup
-
-1. In the NeelSpeak dashboard, go to **Cleanup → Engine → GitHub Copilot**
-2. Click **Sign in to GitHub Copilot** — a browser window opens automatically
-3. Enter the displayed user code and authorise the app
-4. NeelSpeak stores the OAuth token locally; no further sign-in needed
-
-The session token auto-refreshes (~30 min expiry). You can also pick from the list of models your Copilot subscription provides.
-
----
+`MACOS_CERTIFICATE_P12` (base64), `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`.
 
 ## Contributing
 
-Pull requests and issues are welcome! Please open an issue first to discuss larger changes.
-
----
+Issues and pull requests are welcome. Please open an issue first for larger changes.
 
 ## License
 

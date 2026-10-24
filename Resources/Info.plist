@@ -19,17 +19,21 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.1</string>
+    <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>4</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 mrmachineroboboy. MIT License.</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>NeelSpeak needs microphone access to transcribe your speech.</string>
+    <string>NeelSpeak listens only while you hold the dictation key, and transcribes your speech on this Mac.</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>NeelSpeak needs Accessibility access to detect the Right Option shortcut and paste dictated text into the active app.</string>
+    <string>NeelSpeak needs Accessibility access to notice the dictation key in other apps and paste your text where you're typing.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
