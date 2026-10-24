@@ -14,8 +14,10 @@ class SettingsChannel {
   Future<void> set(String key, Object? value) =>
       _channel.invokeMethod<void>('set', {'key': key, 'value': value});
 
-  Future<String?> getSecure(String key) =>
-      _channel.invokeMethod<String>('getSecure', {'key': key});
+  /// Whether a secret is stored. Secret values are write-only from Dart:
+  /// they are never sent back over the channel.
+  Future<bool> hasSecure(String key) async =>
+      await _channel.invokeMethod<bool>('hasSecure', {'key': key}) ?? false;
 
   Future<void> setSecure(String key, String value) =>
       _channel.invokeMethod<void>('setSecure', {'key': key, 'value': value});
@@ -34,6 +36,8 @@ class SystemChannel {
       await _channel.invokeMethod<bool>('isEnabledIme') ?? false;
   Future<bool> isDefaultIme() async =>
       await _channel.invokeMethod<bool>('isDefaultIme') ?? false;
+  Future<String> appVersion() async =>
+      await _channel.invokeMethod<String>('appVersion') ?? '';
 
   /// Tries to open [url] in [preferredPackage] (e.g. "com.github.android"); if
   /// the app isn't installed, falls back to the default browser. Returns one
@@ -56,6 +60,9 @@ class ModelChannel {
       await _channel.invokeMethod<bool>('isParakeetInstalled') ?? false;
   Future<bool> isLlmInstalled() async =>
       await _channel.invokeMethod<bool>('isLlmInstalled') ?? false;
+
+  Future<bool> isDownloading() async =>
+      await _channel.invokeMethod<bool>('isDownloading') ?? false;
 
   Future<void> downloadParakeet() =>
       _channel.invokeMethod<void>('downloadParakeet');
@@ -130,6 +137,9 @@ class DictationChannel {
       await _channel.invokeMethod<String>('start') ?? '';
   Future<String> stopAndAwait() async =>
       await _channel.invokeMethod<String>('stopAndAwait') ?? '';
+  Future<void> cancel() => _channel.invokeMethod<void>('cancel');
   Future<String> state() async =>
       await _channel.invokeMethod<String>('state') ?? '';
+  Future<String?> errorMessage() =>
+      _channel.invokeMethod<String>('errorMessage');
 }

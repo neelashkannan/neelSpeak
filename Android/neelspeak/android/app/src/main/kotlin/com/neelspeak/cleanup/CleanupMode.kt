@@ -121,6 +121,13 @@ data class OpenAiCompatPreset(
             "llama3.2:3b",
             "Any value (Ollama ignores it). 10.0.2.2 = host loopback from emulator.",
         )
+        val OpenCode = OpenAiCompatPreset(
+            "opencode",
+            "OpenCode (local server)",
+            "http://localhost:4096/v1",
+            "anthropic/claude-haiku-5-5",
+            "Run: opencode serve. Uses the providers in your opencode config; the key value is ignored. Use 10.0.2.2 instead of localhost from the emulator.",
+        )
         val Custom = OpenAiCompatPreset(
             "custom",
             "Custom",
@@ -129,6 +136,6 @@ data class OpenAiCompatPreset(
             "",
         )
 
-        val all: List<OpenAiCompatPreset> = listOf(GithubModels, OpenAI, OpenRouter, Groq, Ollama, Custom)
+        val all: List<OpenAiCompatPreset> = listOf(GithubModels, OpenAI, OpenRouter, Groq, Ollama, OpenCode, Custom)
     }
 }

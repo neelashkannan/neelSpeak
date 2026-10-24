@@ -10,7 +10,8 @@ import io.flutter.plugin.common.MethodChannel
  * MethodChannel `neelspeak/settings`:
  *  - getAll() → Map of plain SharedPreferences entries
  *  - set(key, value)
- *  - getSecure(key) → String?      (EncryptedSharedPreferences)
+ *  - hasSecure(key) → Boolean      (EncryptedSharedPreferences; secret values
+ *    are write-only from Dart and never sent back across the channel)
  *  - setSecure(key, value)
  *  - clearSecure(key)
  */
@@ -29,9 +30,9 @@ class SettingsChannel(context: Context) {
                         settings.set(key, value)
                         result.success(null)
                     }
-                    "getSecure" -> {
+                    "hasSecure" -> {
                         val key: String = call.argument("key") ?: return@setMethodCallHandler result.error("ARG", "key required", null)
-                        result.success(secrets.get(key))
+                        result.success(secrets.has(key))
                     }
                     "setSecure" -> {
                         val key: String = call.argument("key") ?: return@setMethodCallHandler result.error("ARG", "key required", null)
@@ -47,7 +48,8 @@ class SettingsChannel(context: Context) {
                     else -> result.notImplemented()
                 }
             } catch (t: Throwable) {
-                result.error("NATIVE", t.message, null)
+                // Never echo the call arguments: they may carry a secret value.
+                result.error("NATIVE", t.javaClass.simpleName, null)
             }
         }
     }

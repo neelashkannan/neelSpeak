@@ -31,6 +31,7 @@ class ParakeetSherpaEngine(
 
     override fun isReady(): Boolean = recognizer != null
 
+    @Synchronized
     override fun load(): Boolean {
         if (recognizer != null) return true
         if (!modelStore.isParakeetInstalled()) return false
@@ -60,24 +61,27 @@ class ParakeetSherpaEngine(
         }
     }
 
+    /** Decodes [samples]. Throws when the model can't be loaded or decoding
+     *  fails, so the caller can surface it instead of committing nothing. */
     override suspend fun transcribe(samples: FloatArray, sampleRate: Int): String {
-        if (!load()) return ""
-        return try {
+        if (!load()) throw IllegalStateException("Speech model could not be loaded. Open NeelSpeak to download it again.")
+        return synchronized(this) {
+            val rec = recognizer ?: throw IllegalStateException("Speech model is not loaded")
             val started = System.currentTimeMillis()
-            val rec = recognizer ?: return ""
             val stream = rec.createStream()
-            stream.acceptWaveform(samples, sampleRate)
-            rec.decode(stream)
-            val text = rec.getResult(stream).text
-            stream.release()
-            Log.i("NeelSpeak.STT", "Transcribed ${samples.size} samples in ${System.currentTimeMillis() - started} ms")
-            text
-        } catch (e: Throwable) {
-            Log.e("NeelSpeak.STT", "transcribe failed: ${e.message}", e)
-            ""
+            try {
+                stream.acceptWaveform(samples, sampleRate)
+                rec.decode(stream)
+                val text = rec.getResult(stream).text
+                Log.i("NeelSpeak.STT", "Transcribed ${samples.size} samples in ${System.currentTimeMillis() - started} ms")
+                text
+            } finally {
+                stream.release()
+            }
         }
     }
 
+    @Synchronized
     override fun release() {
         try {
             recognizer?.release()

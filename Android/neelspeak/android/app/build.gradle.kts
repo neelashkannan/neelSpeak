@@ -1,9 +1,27 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Release signing. Put a keystore outside the repo and describe it in
+// android/key.properties (git-ignored):
+//   storeFile=/absolute/path/to/neelspeak-release.jks
+//   storePassword=...
+//   keyAlias=neelspeak
+//   keyPassword=...
+// Without that file, release builds fall back to the debug key so
+// `flutter build apk --release` still works locally. Those APKs are fine for
+// side-loading but can't be uploaded to Play or installed over a properly
+// signed build.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val hasReleaseKeystore = keystoreProperties.getProperty("storeFile") != null
 
 android {
     namespace = "com.neelspeak"
@@ -13,10 +31,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     buildFeatures {
@@ -31,16 +45,41 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
             isShrinkResources = false
         }
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
+            // R8 stays off: sherpa-onnx and MediaPipe reach their Kotlin/Java
+            // classes from JNI and reflection, and the on-device LLM client
+            // loads MediaPipe reflectively. Turn this on only together with
+            // verified keep rules.
             isMinifyEnabled = false
             isShrinkResources = false
         }
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 
@@ -81,4 +120,8 @@ dependencies {
 
     // MediaPipe GenAI for on-device Gemma cleanup
     implementation("com.google.mediapipe:tasks-genai:0.10.14")
+
+    // JVM unit tests (./gradlew :app:testDebugUnitTest)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

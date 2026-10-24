@@ -16,45 +16,51 @@ class CleanupModePage extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       body: AppBackdrop(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            children: [
-              const SectionIntro(
-                eyebrow: 'Transcript behavior',
-                title: 'Choose how much cleanup to apply.',
-                subtitle:
-                    'Pick the amount of post-processing NeelSpeak should do before it inserts text into the active app.',
-              ),
-              const SizedBox(height: 20),
-              _ModeOption(
-                value: 'off',
-                title: 'Off',
-                subtitle: 'Type exactly what was said with no polishing.',
-                icon: Icons.mic_none_rounded,
-                selected: selected,
-                onSelect: notifier.setCleanupMode,
-              ),
-              const SizedBox(height: 12),
-              _ModeOption(
-                value: 'conservative',
-                title: 'Conservative',
-                subtitle:
-                    'Remove fillers, stutters, repetitions, and course corrections while keeping your wording intact.',
-                icon: Icons.auto_fix_high_rounded,
-                selected: selected,
-                onSelect: notifier.setCleanupMode,
-              ),
-              const SizedBox(height: 12),
-              _ModeOption(
-                value: 'aggressive',
-                title: 'Aggressive',
-                subtitle:
-                    'Also tighten phrasing and fix obvious spoken-word slips for a more polished final result.',
-                icon: Icons.bolt_rounded,
-                selected: selected,
-                onSelect: notifier.setCleanupMode,
-              ),
-            ],
+          child: RadioGroup<String>(
+            groupValue: selected,
+            onChanged: (next) {
+              if (next != null) notifier.setCleanupMode(next);
+            },
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              children: [
+                const SectionIntro(
+                  eyebrow: 'Transcript behavior',
+                  title: 'Choose how much cleanup to apply.',
+                  subtitle:
+                      'Pick the amount of post-processing NeelSpeak should do before it inserts text into the active app.',
+                ),
+                const SizedBox(height: 20),
+                _ModeOption(
+                  value: 'off',
+                  title: 'Off',
+                  subtitle: 'Type exactly what was said with no polishing.',
+                  icon: Icons.mic_none_rounded,
+                  selected: selected,
+                  onSelect: notifier.setCleanupMode,
+                ),
+                const SizedBox(height: 12),
+                _ModeOption(
+                  value: 'conservative',
+                  title: 'Conservative',
+                  subtitle:
+                      'Remove fillers, stutters, repetitions, and course corrections while keeping your wording intact.',
+                  icon: Icons.auto_fix_high_rounded,
+                  selected: selected,
+                  onSelect: notifier.setCleanupMode,
+                ),
+                const SizedBox(height: 12),
+                _ModeOption(
+                  value: 'aggressive',
+                  title: 'Aggressive',
+                  subtitle:
+                      'Also tighten phrasing and fix obvious spoken-word slips for a more polished final result.',
+                  icon: Icons.bolt_rounded,
+                  selected: selected,
+                  onSelect: notifier.setCleanupMode,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -113,20 +119,17 @@ class _ModeOption extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    Radio<String>(
-                      value: value,
-                      groupValue: selected,
-                      onChanged: (next) {
-                        if (next != null) onSelect(next);
-                      },
-                    ),
+                    Radio<String>(value: value),
                   ],
                 ),
                 Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(170),
-                  ),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(170),
+                      ),
                 ),
               ],
             ),

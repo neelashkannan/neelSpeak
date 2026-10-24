@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ backup and device-to-device transfer. Only the plain settings
+  file is copied. Excluded on purpose:
+    - neelspeak_secrets.xml: API keys and OAuth tokens. It is encrypted with a
+      Keystore key that never leaves this device, so a restored copy could not
+      be decrypted anyway.
+    - files/models: the speech and cleanup models (hundreds of MB); onboarding
+      downloads them again.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="sharedpref" path="neelspeak_settings.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="neelspeak_settings.xml" />
+    </device-transfer>
+</data-extraction-rules>

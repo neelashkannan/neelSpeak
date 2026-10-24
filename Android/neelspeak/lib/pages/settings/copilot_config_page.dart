@@ -19,6 +19,20 @@ class _State extends ConsumerState<CopilotConfigPage> {
   bool _waiting = false;
   String? _error;
   String? _launchMessage;
+  final _customModel = TextEditingController();
+  List<String>? _availableModels;
+  bool _loadingModels = false;
+  String? _modelsError;
+
+  static const _modelPresets = <(String, String)>[
+    ('gpt-4o-mini', 'Fast · low cost'),
+    ('gpt-4o', 'Balanced quality'),
+    ('gpt-4.1', 'Latest GPT-4.1'),
+    ('claude-3.5-sonnet', 'Anthropic Sonnet'),
+    ('claude-sonnet-4', 'Sonnet 4'),
+    ('o4-mini', 'Reasoning · mini'),
+    ('gemini-2.0-flash-001', 'Google Gemini'),
+  ];
 
   @override
   void initState() {
@@ -26,11 +40,46 @@ class _State extends ConsumerState<CopilotConfigPage> {
     _checkExistingToken();
   }
 
+  @override
+  void dispose() {
+    _customModel.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setModel(String value) async {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+    await ref
+        .read(settingsProvider.notifier)
+        .set(Keys.cloudCopilotModel, trimmed);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copilot model set to $trimmed')),
+    );
+  }
+
   Future<void> _checkExistingToken() async {
-    final token = await ref
+    final signedIn = await ref
         .read(settingsChannelProvider)
-        .getSecure(Keys.cloudCopilotOAuth);
-    setState(() => _signedIn = (token != null && token.isNotEmpty));
+        .hasSecure(Keys.cloudCopilotOAuth);
+    if (mounted) setState(() => _signedIn = signedIn);
+  }
+
+  Future<void> _loadModels() async {
+    setState(() {
+      _loadingModels = true;
+      _modelsError = null;
+    });
+    try {
+      final models = await ref.read(cleanupChannelProvider).fetchCopilotModels();
+      if (!mounted) return;
+      setState(() => _availableModels = models);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _modelsError = _friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _loadingModels = false);
+    }
   }
 
   Future<void> _start() async {
@@ -41,6 +90,7 @@ class _State extends ConsumerState<CopilotConfigPage> {
     });
     try {
       final code = await ref.read(copilotChannelProvider).requestDeviceCode();
+      if (!mounted) return;
       setState(() {
         _userCode = code['userCode'] as String?;
         _verificationUrl = code['verificationUrl'] as String?;
@@ -55,15 +105,16 @@ class _State extends ConsumerState<CopilotConfigPage> {
             expiresAtMillis: code['expiresAtMillis'] as int? ??
                 (DateTime.now().millisecondsSinceEpoch + 5 * 60 * 1000),
           );
+      if (!mounted) return;
       setState(() {
         _signedIn = true;
         _userCode = null;
         _verificationUrl = null;
       });
     } catch (e) {
-      setState(() => _error = _friendlyError(e));
+      if (mounted) setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _waiting = false);
+      if (mounted) setState(() => _waiting = false);
     }
   }
 
@@ -90,6 +141,7 @@ class _State extends ConsumerState<CopilotConfigPage> {
 
   Future<void> _signOut() async {
     await ref.read(copilotChannelProvider).signOut();
+    if (!mounted) return;
     setState(() {
       _signedIn = false;
       _launchMessage = null;
@@ -143,6 +195,88 @@ class _State extends ConsumerState<CopilotConfigPage> {
       _verificationUrl ??
       'https://github.com/login/device';
 
+  Widget _modelPicker(BuildContext context) {
+    final current = ref.watch(settingsProvider).copilotModel;
+    final theme = Theme.of(context);
+    return GlassPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Model', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Active: $current',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurface.withAlpha(160),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (_availableModels case final models?)
+                for (final id in models)
+                  ChoiceChip(
+                    label: Text(id),
+                    selected: current == id,
+                    onSelected: (_) => _setModel(id),
+                  )
+              else
+                for (final preset in _modelPresets)
+                  ChoiceChip(
+                    label: Text(preset.$1),
+                    tooltip: preset.$2,
+                    selected: current == preset.$1,
+                    onSelected: (_) => _setModel(preset.$1),
+                  ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: _loadingModels ? null : _loadModels,
+            icon: _loadingModels
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            label: Text(_availableModels == null
+                ? 'Show models on my plan'
+                : 'Refresh model list'),
+          ),
+          if (_modelsError != null)
+            Text(
+              _modelsError!,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _customModel,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom model id',
+                    hintText: 'e.g. gpt-4.1',
+                  ),
+                  onSubmitted: _setModel,
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonalIcon(
+                onPressed: () => _setModel(_customModel.text),
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Use'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -154,10 +288,9 @@ class _State extends ConsumerState<CopilotConfigPage> {
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             children: [
               SectionIntro(
-                eyebrow: 'Secure sign-in',
-                title: 'Connect GitHub Copilot on Android.',
+                                title: 'Connect GitHub Copilot',
                 subtitle:
-                    'NeelSpeak starts the OAuth device flow, tries the GitHub mobile app first, and falls back cleanly to the browser when Android cannot hand that link to GitHub.',
+                    'Sign in with GitHub to tidy dictation with the models on your Copilot plan. NeelSpeak opens the GitHub app if you have it, or your browser.',
                 trailing: InfoPill(
                   label: _signedIn ? 'Connected' : 'Setup required',
                   icon: _signedIn ? Icons.check_circle : Icons.lock_outline,
@@ -185,6 +318,8 @@ class _State extends ConsumerState<CopilotConfigPage> {
                   icon: const Icon(Icons.logout_rounded),
                   label: const Text('Sign out'),
                 ),
+                const SizedBox(height: 20),
+                _modelPicker(context),
               ] else ...[
                 const GlassPanel(
                   child: Column(

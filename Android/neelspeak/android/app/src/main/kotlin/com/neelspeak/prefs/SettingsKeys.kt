@@ -19,6 +19,10 @@ object SettingsKeys {
     const val CLOUD_COPILOT_MODEL = "cloud.copilot.model"
     const val ON_DEVICE_LLM_ID = "onDevice.llm.id"
     const val THEME_ID = "theme.id"
+    /** Last cleanup failure (already redacted) and when it happened (epoch ms).
+     *  Cleared by the next successful cleanup. */
+    const val CLEANUP_LAST_ERROR = "cleanup.lastError"
+    const val CLEANUP_LAST_ERROR_AT = "cleanup.lastErrorAt"
 
     // Secrets (EncryptedSharedPreferences)
     const val CLOUD_OPENAI_KEY = "cloud.openai.apiKey"

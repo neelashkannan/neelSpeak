@@ -9,16 +9,14 @@ import android.media.MediaRecorder
 import android.util.Log
 import androidx.core.content.ContextCompat
 import android.content.Context
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * 16 kHz mono PCM16 microphone capture, drained as a FloatArray ready for the
  * sherpa-onnx Parakeet recognizer. Equivalent of AudioEngine.swift on macOS.
+ *
+ * One [AudioRecord] and one reader thread per recording; both are released in
+ * [stopAndDrain] (also used to discard a recording), so the microphone is
+ * never held between dictations.
  */
 class AudioCapture(private val context: Context) {
     companion object {
@@ -29,9 +27,12 @@ class AudioCapture(private val context: Context) {
     }
 
     private var record: AudioRecord? = null
-    private var job: Job? = null
-    private val samples = ArrayList<Float>(SAMPLE_RATE * 30) // ~30s headroom
+    private var reader: Thread? = null
     private val lock = Object()
+    private var samples = FloatArray(SAMPLE_RATE * 30) // ~30 s before the first grow
+    private var count = 0
+
+    val isRecording: Boolean get() = synchronized(lock) { record != null }
 
     fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -39,10 +40,14 @@ class AudioCapture(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun start() {
-        if (!hasMicPermission()) error("RECORD_AUDIO permission not granted")
-        if (record != null) return
+        if (!hasMicPermission()) throw SecurityException("Microphone permission not granted")
+        synchronized(lock) {
+            if (record != null) return
+            count = 0
+        }
 
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
+        if (minBuf <= 0) throw IllegalStateException("This device can't record 16 kHz mono audio")
         val bufSize = maxOf(minBuf, SAMPLE_RATE * 2) // ~1s buffer
         val rec = AudioRecord(
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -53,38 +58,77 @@ class AudioCapture(private val context: Context) {
         )
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
             rec.release()
-            error("AudioRecord init failed")
+            throw IllegalStateException("Microphone unavailable")
         }
-        record = rec
-        synchronized(lock) { samples.clear() }
-        rec.startRecording()
+        try {
+            rec.startRecording()
+        } catch (t: Throwable) {
+            rec.release()
+            throw IllegalStateException("Microphone unavailable")
+        }
+        // Another app (a call, a recorder) can hold the mic; startRecording()
+        // then returns without actually recording.
+        if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            rec.release()
+            throw IllegalStateException("Microphone is in use by another app")
+        }
 
-        job = CoroutineScope(Dispatchers.IO).launch {
-            val buffer = ShortArray(bufSize / 2)
-            while (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                val read = rec.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
-                synchronized(lock) {
-                    for (i in 0 until read) {
-                        samples.add(buffer[i].toFloat() / 32768f)
-                    }
-                }
-            }
+        val thread = Thread({ readLoop(rec, bufSize / 2) }, "NeelSpeak-mic")
+        synchronized(lock) {
+            record = rec
+            reader = thread
         }
+        thread.start()
         Log.i(TAG, "started capture @${SAMPLE_RATE}Hz mono")
     }
 
+    private fun readLoop(rec: AudioRecord, chunk: Int) {
+        val buffer = ShortArray(chunk)
+        while (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+            val read = try {
+                rec.read(buffer, 0, buffer.size)
+            } catch (_: Throwable) {
+                break
+            }
+            if (read < 0) break // ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT
+            if (read == 0) continue
+            synchronized(lock) {
+                if (count + read > samples.size) {
+                    samples = samples.copyOf(maxOf(samples.size * 2, count + read))
+                }
+                for (i in 0 until read) {
+                    samples[count + i] = buffer[i] / 32768f
+                }
+                count += read
+            }
+        }
+    }
+
+    /** Stops capture, releases the mic, and returns everything recorded. */
     fun stopAndDrain(): FloatArray {
-        val rec = record ?: return FloatArray(0)
+        val (rec, thread) = synchronized(lock) {
+            val r = record ?: return FloatArray(0)
+            record = null
+            val t = reader
+            reader = null
+            r to t
+        }
         try {
             rec.stop()
         } catch (_: IllegalStateException) {
             // already stopped
         }
-        runBlocking { job?.cancelAndJoin() }
+        try {
+            thread?.join(1_000)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
         rec.release()
-        record = null
-        job = null
-        return synchronized(lock) { samples.toFloatArray().also { samples.clear() } }
+        return synchronized(lock) {
+            val out = samples.copyOf(count)
+            count = 0
+            if (samples.size > SAMPLE_RATE * 30) samples = FloatArray(SAMPLE_RATE * 30)
+            out
+        }
     }
 }

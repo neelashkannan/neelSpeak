@@ -22,10 +22,11 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.neelspeak.app.NeelSpeakApplication
+import com.neelspeak.coordinator.DictationCoordinator
+import com.neelspeak.coordinator.DictationState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -45,6 +46,9 @@ class NeelSpeakImeService : InputMethodService(),
     private var scope: CoroutineScope? = null
     private val lastTranscript = mutableStateOf<String?>(null)
 
+    private val coordinator: DictationCoordinator
+        get() = (applicationContext as NeelSpeakApplication).coordinator
+
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val viewModelStore: ViewModelStore get() = vmStore
     override val savedStateRegistry: SavedStateRegistry get() = savedStateController.savedStateRegistry
@@ -55,32 +59,48 @@ class NeelSpeakImeService : InputMethodService(),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-        scope = MainScope()
+        // Collected once per service, not per input view: onCreateInputView
+        // runs again on rotation/theme changes and would commit twice.
+        scope = MainScope().also { s ->
+            s.launch {
+                coordinator.results.collect { result ->
+                    if (result.origin != DictationCoordinator.Origin.Keyboard) return@collect
+                    if (result.text.isBlank()) return@collect
+                    commit(result.text)
+                    lastTranscript.value = result.text
+                }
+            }
+        }
+    }
+
+    /** Inserts [text], adding a separating space only when the cursor sits
+     *  right after a non-space character. */
+    private fun commit(text: String) {
+        val ic = currentInputConnection ?: return
+        val before = ic.getTextBeforeCursor(1, 0)
+        val needsSpace = !before.isNullOrEmpty() && !before.last().isWhitespace()
+        ic.commitText((if (needsSpace) " " else "") + text, 1)
     }
 
     override fun onCreateInputView(): View {
-        val app = applicationContext as NeelSpeakApplication
-        val coord = app.coordinator
-
-        scope?.launch {
-            coord.transcripts.collectLatest { text ->
-                currentInputConnection?.commitText(text + " ", 1)
-                lastTranscript.value = text
-            }
-        }
+        val coord = coordinator
 
         val composeView = ComposeView(this).apply {
             setContent {
                 NeelSpeakImeTheme {
                     val state by coord.state.collectAsState()
+                    val notice by coord.notice.collectAsState()
                     val transcript by lastTranscript
                     NeelSpeakKeyboardSurface(
                         state = state,
                         lastTranscript = transcript,
+                        notice = notice,
                         onPressDown = { coord.beginDictation() },
                         onPressUp = { coord.endDictation() },
+                        onCancel = { coord.cancelDictation() },
+                        onTapIdleState = { handleStatusTap(coord) },
+                        onDismissNotice = { coord.dismissNotice() },
                         onSwitchKeyboard = { showKeyboardPicker() },
-                        onOpenApp = { openSettingsApp() },
                     )
                 }
             }
@@ -100,12 +120,31 @@ class NeelSpeakImeService : InputMethodService(),
         }.also { it.addView(composeView) }
     }
 
+    /** Tap on the pill while it can't record: open the app when setup is
+     *  missing, otherwise clear the error so the next hold works. */
+    private fun handleStatusTap(coord: DictationCoordinator) {
+        if (coord.needsApp) {
+            openSettingsApp()
+        } else if (coord.state.value is DictationState.Error) {
+            coord.clearError()
+        }
+    }
+
+    override fun onFinishInputView(finishingInput: Boolean) {
+        // Keyboard hidden or the field went away mid-hold: release the mic
+        // and drop the recording instead of typing into whatever comes next.
+        if (coordinator.state.value is DictationState.Recording) coordinator.cancelDictation()
+        super.onFinishInputView(finishingInput)
+    }
+
     override fun onDestroy() {
+        if (coordinator.state.value is DictationState.Recording) coordinator.cancelDictation()
         scope?.cancel()
         scope = null
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        vmStore.clear()
         super.onDestroy()
     }
 

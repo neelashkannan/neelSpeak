@@ -39,7 +39,9 @@ class CleanupChannel(context: Context) {
                             ))
                         }
                     } catch (t: Throwable) {
-                        withContext(Dispatchers.Main) { result.error("CLEANUP", t.message, null) }
+                        withContext(Dispatchers.Main) {
+                            result.error("CLEANUP", LlmTranscriptCleaner.describeFailure(t), null)
+                        }
                     }
                 }
                 "fetchCopilotModels" -> scope.launch {
@@ -47,7 +49,9 @@ class CleanupChannel(context: Context) {
                         val models = cleaner.copilotFetchModels()
                         withContext(Dispatchers.Main) { result.success(models) }
                     } catch (t: Throwable) {
-                        withContext(Dispatchers.Main) { result.error("CLEANUP", t.message, null) }
+                        withContext(Dispatchers.Main) {
+                            result.error("CLEANUP", LlmTranscriptCleaner.describeFailure(t), null)
+                        }
                     }
                 }
                 else -> result.notImplemented()

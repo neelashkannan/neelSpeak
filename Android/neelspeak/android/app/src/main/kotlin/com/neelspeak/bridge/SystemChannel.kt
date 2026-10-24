@@ -17,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
  *   - showImePicker()
  *   - isEnabledIme() -> bool
  *   - isDefaultIme() -> bool
+ *   - appVersion() -> String (versionName from pubspec via Gradle)
  */
 class SystemChannel(private val host: Activity) {
     fun register(messenger: BinaryMessenger) {
@@ -42,6 +43,10 @@ class SystemChannel(private val host: Activity) {
                         host.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD
                     )
                     result.success(current?.startsWith(host.packageName) == true)
+                }
+                "appVersion" -> {
+                    val info = host.packageManager.getPackageInfo(host.packageName, 0)
+                    result.success(info.versionName ?: "")
                 }
                 "openUrlPreferringApp" -> {
                     val url: String = call.argument("url") ?: return@setMethodCallHandler result.error("ARG", "url required", null)

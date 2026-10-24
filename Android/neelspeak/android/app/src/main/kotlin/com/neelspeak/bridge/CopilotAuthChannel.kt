@@ -2,6 +2,7 @@ package com.neelspeak.bridge
 
 import android.content.Context
 import com.neelspeak.cleanup.CopilotAuthService
+import com.neelspeak.cleanup.LlmTranscriptCleaner
 import com.neelspeak.prefs.SecureStore
 import com.neelspeak.prefs.SettingsKeys
 import io.flutter.plugin.common.BinaryMessenger
@@ -40,7 +41,7 @@ class CopilotAuthChannel(context: Context) {
                             ))
                         }
                     } catch (t: Throwable) {
-                        withContext(Dispatchers.Main) { result.error("AUTH", t.message, null) }
+                        withContext(Dispatchers.Main) { result.error("AUTH", LlmTranscriptCleaner.redact(t.message ?: "Sign-in failed"), null) }
                     }
                 }
                 "pollForOAuthToken" -> scope.launch {
@@ -64,7 +65,7 @@ class CopilotAuthChannel(context: Context) {
                         secrets.set(SettingsKeys.CLOUD_COPILOT_OAUTH, token)
                         withContext(Dispatchers.Main) { result.success(null) }
                     } catch (t: Throwable) {
-                        withContext(Dispatchers.Main) { result.error("AUTH", t.message, null) }
+                        withContext(Dispatchers.Main) { result.error("AUTH", LlmTranscriptCleaner.redact(t.message ?: "Sign-in failed"), null) }
                     }
                 }
                 "signOut" -> {

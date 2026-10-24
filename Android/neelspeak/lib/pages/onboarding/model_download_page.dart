@@ -4,11 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/settings_provider.dart';
+import '../../ui/app_theme.dart';
 import '../../ui/premium_widgets.dart';
 
+/// Downloads the Parakeet speech model. Used as an onboarding step and, with
+/// [inOnboarding] false, as a standalone screen from Home.
 class ModelDownloadPage extends ConsumerStatefulWidget {
-  const ModelDownloadPage({super.key, required this.onNext});
+  const ModelDownloadPage({
+    super.key,
+    required this.onNext,
+    this.inOnboarding = true,
+  });
   final VoidCallback onNext;
+  final bool inOnboarding;
 
   @override
   ConsumerState<ModelDownloadPage> createState() => _ModelDownloadPageState();
@@ -17,6 +25,7 @@ class ModelDownloadPage extends ConsumerStatefulWidget {
 class _ModelDownloadPageState extends ConsumerState<ModelDownloadPage> {
   bool _started = false;
   bool _done = false;
+  bool _paused = false;
   String _phase = 'idle';
   int _bytes = 0;
   int _total = 0;
@@ -31,26 +40,26 @@ class _ModelDownloadPageState extends ConsumerState<ModelDownloadPage> {
   }
 
   Future<void> _checkInstalled() async {
-    final installed =
-        await ref.read(modelChannelProvider).isParakeetInstalled();
-    if (installed && mounted) {
+    final model = ref.read(modelChannelProvider);
+    final installed = await model.isParakeetInstalled();
+    if (!mounted) return;
+    if (installed) {
       setState(() {
         _done = true;
         _phase = 'done';
       });
+      return;
+    }
+    // A download started earlier (e.g. before leaving this screen) is still
+    // running natively: pick its progress back up.
+    if (await model.isDownloading() && mounted) {
+      setState(() => _started = true);
+      _listen();
     }
   }
 
-  Future<void> _start() async {
-    await _sub?.cancel();
-    setState(() {
-      _started = true;
-      _phase = 'starting';
-      _bytes = 0;
-      _total = 0;
-      _extractedFiles = 0;
-      _error = null;
-    });
+  void _listen() {
+    _sub?.cancel();
     _sub = ref.read(modelChannelProvider).progress().listen((event) {
       if (!mounted) return;
       setState(() {
@@ -64,20 +73,42 @@ class _ModelDownloadPageState extends ConsumerState<ModelDownloadPage> {
         } else if (_phase == 'done') {
           _done = true;
           _sub?.cancel();
+          ref.invalidate(setupStatusProvider);
         } else if (_phase == 'failed') {
           _error = event['message'] as String?;
+          _started = false;
+          _sub?.cancel();
+        } else if (_phase == 'cancelled') {
+          _paused = true;
+          _started = false;
           _sub?.cancel();
         }
       });
     });
+  }
+
+  Future<void> _start() async {
+    setState(() {
+      _started = true;
+      _paused = false;
+      _phase = 'starting';
+      _extractedFiles = 0;
+      _error = null;
+    });
+    _listen();
     try {
       await ref.read(modelChannelProvider).downloadParakeet();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = 'Could not start the download. Check your connection and try again.';
         _started = false;
       });
     }
+  }
+
+  Future<void> _cancel() async {
+    await ref.read(modelChannelProvider).cancelDownload();
   }
 
   @override
@@ -88,161 +119,152 @@ class _ModelDownloadPageState extends ConsumerState<ModelDownloadPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final pct = _total > 0 ? _bytes / _total : null;
-    final mb = (_bytes / 1024 / 1024).toStringAsFixed(1);
+    final mb = (_bytes / 1024 / 1024).toStringAsFixed(0);
     final totalMb =
-        _total > 0 ? (_total / 1024 / 1024).toStringAsFixed(0) : '~190';
+        _total > 0 ? (_total / 1024 / 1024).toStringAsFixed(0) : '460';
+    final busy = _started && !_done && _error == null;
 
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: Space.sm),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
           child: GlassPanel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withAlpha(22),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Icon(
-                    Icons.download_for_offline_rounded,
-                    size: 30,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 24),
+                const StepIcon(icon: Icons.download_for_offline_rounded),
+                const SizedBox(height: Space.xl),
                 Text(
-                  'Download speech model',
-                  style: Theme.of(context).textTheme.headlineSmall,
+                  'Download the speech model',
+                  style: theme.textTheme.headlineSmall,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: Space.md),
                 Text(
-                  'NeelSpeak transcribes on-device using NVIDIA Parakeet TDT. Download size is about 190 MB, so Wi-Fi is recommended.',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(180),
+                  'NeelSpeak turns speech into text on this phone with NVIDIA Parakeet, so your voice never leaves the device. The model is a one-time download of about 460 MB — Wi-Fi recommended. If it stops, you can pick up where it left off.',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurface.withAlpha(180),
                   ),
                 ),
-                const SizedBox(height: 24),
-                GlassPanel(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const DetailRow(
-                        label: 'Runtime',
-                        value: 'NVIDIA Parakeet TDT running locally on-device',
-                        icon: Icons.memory_rounded,
-                      ),
-                      const SizedBox(height: 16),
-                      const DetailRow(
-                        label: 'Download size',
-                        value: 'Approximately 190 MB',
-                        icon: Icons.storage_rounded,
-                      ),
-                      if (_started && !_done && _error == null) ...[
-                        const SizedBox(height: 20),
-                        if (_phase == 'downloading') ...[
-                          LinearProgressIndicator(
-                            value: pct,
-                            minHeight: 8,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            pct != null
-                                ? '$mb / $totalMb MB (${(pct * 100).toStringAsFixed(1)}%)'
-                                : '$mb MB downloaded',
-                          ),
-                        ] else if (_phase == 'extracting') ...[
-                          const LinearProgressIndicator(minHeight: 8),
-                          const SizedBox(height: 10),
-                          Text('Extracting model files: $_extractedFiles'),
-                        ] else ...[
-                          const LinearProgressIndicator(minHeight: 8),
-                          const SizedBox(height: 10),
-                          Text('Phase: $_phase'),
-                        ],
-                      ],
-                      if (_done) ...[
-                        const SizedBox(height: 20),
-                        const InfoPill(
-                          label: 'Model installed',
-                          icon: Icons.check_circle,
-                          tint: Colors.green,
-                        ),
-                      ],
-                      if (_error != null) ...[
-                        const SizedBox(height: 20),
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton(
-                          onPressed: _start,
-                          child: const Text('Retry download'),
-                        ),
-                      ],
-                    ],
-                  ),
+                const SizedBox(height: Space.lg),
+                const Wrap(
+                  spacing: Space.sm,
+                  runSpacing: Space.sm,
+                  children: [
+                    InfoPill(
+                      label: 'Runs offline',
+                      icon: Icons.memory_rounded,
+                    ),
+                    InfoPill(
+                      label: '460 MB download',
+                      icon: Icons.storage_rounded,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
+                if (busy) ...[
+                  const SizedBox(height: Space.xl),
+                  Semantics(
+                    liveRegion: true,
+                    child: _ProgressBlock(
+                      value: _phase == 'downloading' ? pct : null,
+                      label: switch (_phase) {
+                        'downloading' => pct != null
+                            ? '$mb of $totalMb MB · ${(pct * 100).toStringAsFixed(0)}%'
+                            : '$mb MB downloaded',
+                        'extracting' =>
+                          'Unpacking model files ($_extractedFiles of 4)…',
+                        _ => 'Connecting…',
+                      },
+                    ),
+                  ),
+                  if (_phase != 'extracting') ...[
+                    const SizedBox(height: Space.md),
+                    TextButton.icon(
+                      onPressed: _cancel,
+                      icon: const Icon(Icons.pause_rounded),
+                      label: const Text('Pause download'),
+                    ),
+                  ],
+                ],
+                if (_paused && !_started && _error == null) ...[
+                  const SizedBox(height: Space.lg),
+                  const StatusBanner(
+                    tone: StatusTone.info,
+                    message:
+                        'Download paused. Resume any time — it continues from where it stopped.',
+                  ),
+                ],
+                if (_done) ...[
+                  const SizedBox(height: Space.lg),
+                  const StatusBanner(
+                    tone: StatusTone.success,
+                    message: 'Speech model installed. You are ready to dictate.',
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: Space.lg),
+                  StatusBanner(
+                    title: 'Download didn’t finish',
+                    message: _error!,
+                  ),
+                ],
+                const SizedBox(height: Space.xl),
                 if (!_started && !_done)
                   FilledButton.icon(
                     onPressed: _start,
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Start download'),
+                    icon: Icon(_paused || _error != null
+                        ? Icons.refresh_rounded
+                        : Icons.download_rounded),
+                    label: Text(_paused || _error != null
+                        ? 'Resume download'
+                        : 'Download model'),
                   ),
-                const SizedBox(height: 24),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    if (constraints.maxWidth < 520) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          OutlinedButton(
-                            onPressed: widget.onNext,
-                            child: const Text('Skip for now'),
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: _done ? widget.onNext : null,
-                            child: const Text('Continue'),
-                          ),
-                        ],
-                      );
-                    }
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: widget.onNext,
-                            child: const Text('Skip for now'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: _done ? widget.onNext : null,
-                            child: const Text('Continue'),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
+                if (!_started && !_done) const SizedBox(height: Space.md),
+                if (widget.inOnboarding && _done)
+                  FilledButton(
+                    onPressed: widget.onNext,
+                    child: const Text('Continue'),
+                  )
+                else if (widget.inOnboarding)
+                  OutlinedButton(
+                    onPressed: widget.onNext,
+                    child: const Text('Skip for now'),
+                  )
+                else if (_done)
+                  FilledButton(
+                    onPressed: widget.onNext,
+                    child: const Text('Done'),
+                  ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ProgressBlock extends StatelessWidget {
+  const _ProgressBlock({required this.value, required this.label});
+
+  final double? value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LinearProgressIndicator(
+          value: value,
+          minHeight: 8,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        const SizedBox(height: Space.sm),
+        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+      ],
     );
   }
 }

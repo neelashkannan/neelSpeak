@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/settings_provider.dart';
@@ -11,7 +12,14 @@ class TestCleanupPage extends ConsumerStatefulWidget {
 }
 
 class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
-  final _input = TextEditingController(text: 'um so like the the meeting is at three you know');
+  final _input = TextEditingController(
+      text: 'um so like the the meeting is at three you know');
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
   String? _output;
   int? _latencyMs;
   String? _error;
@@ -25,14 +33,17 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
         text: _input.text,
         mode: mode == 'off' ? 'conservative' : mode,
       );
+      if (!mounted) return;
       setState(() {
         _output = r['result'] as String?;
         _latencyMs = r['latencyMs'] as int?;
       });
+    } on PlatformException catch (e) {
+      if (mounted) setState(() => _error = e.message ?? 'Cleanup failed.');
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = 'Cleanup failed.');
     } finally {
-      setState(() => _running = false);
+      if (mounted) setState(() => _running = false);
     }
   }
 
@@ -46,11 +57,11 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             children: [
-              const SectionIntro(
-                eyebrow: 'Verification',
-                title: 'Dry-run the current cleanup stack.',
-                subtitle:
-                    'Send a sample transcript through the configured cleanup engine and check the final output before you start dictating.',
+              SectionIntro(
+                title: 'Try your cleanup engine',
+                subtitle: ref.watch(settingsProvider).cleanupMode == 'off'
+                    ? 'Cleanup is off, so this runs in Conservative mode just to check the engine works.'
+                    : 'Edit the sample if you like, then run it through your engine to check the result and speed.',
               ),
               const SizedBox(height: 20),
               GlassPanel(
@@ -61,7 +72,7 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
                       controller: _input,
                       maxLines: 5,
                       decoration: const InputDecoration(
-                        labelText: 'Raw transcript',
+                        labelText: 'Sample transcript',
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -80,7 +91,7 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       InfoPill(
-                        label: 'Output (${_latencyMs ?? 0} ms)',
+                        label: 'Result · ${_latencyMs ?? 0} ms',
                         icon: Icons.timer_outlined,
                       ),
                       const SizedBox(height: 16),
@@ -92,9 +103,9 @@ class _TestCleanupPageState extends ConsumerState<TestCleanupPage> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 16),
-                  child: Text(
-                    _error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  child: StatusBanner(
+                    title: 'Cleanup didn’t work',
+                    message: _error!,
                   ),
                 ),
             ],

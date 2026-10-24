@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- White waveform from assets/logo_mark.png, sized for the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30.00,60.48 L34.19,60.48 C36.80,60.48 37.36,51.25 39.97,51.25 C43.33,51.25 44.07,68.21 46.87,68.21 C50.32,68.21 50.97,39.79 54.00,39.79 C57.03,39.79 57.68,68.21 61.13,68.21 C63.93,68.21 64.67,51.25 68.03,51.25 C70.64,51.25 71.20,60.48 73.81,60.48 L78.00,60.48" />
+</vector>

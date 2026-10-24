@@ -23,7 +23,10 @@ class LlmTranscriptCleaner(private val context: Context) {
     private val onDevice by lazy { OnDeviceLlmClient(context, ModelStore(context)) }
 
     private var copilotSession: CopilotAuthService.SessionToken? = null
+    private var copilotSessionOwner: String? = null
 
+    /** Cleans [text] with the configured engine. Throws on any failure; the
+     *  coordinator decides how to fall back. */
     suspend fun clean(text: String, mode: CleanupMode): String {
         if (mode == CleanupMode.Off || text.isBlank()) return text
         val engine = CleanupEngine.fromRaw(settings.getString(SettingsKeys.CLEANUP_ENGINE))
@@ -40,7 +43,7 @@ class LlmTranscriptCleaner(private val context: Context) {
                     text,
                     mode,
                     secrets.get(SettingsKeys.CLOUD_ANTHROPIC_KEY).orEmpty(),
-                    settings.getString(SettingsKeys.CLOUD_ANTHROPIC_MODEL).ifEmpty { "claude-haiku-4-5" },
+                    settings.getString(SettingsKeys.CLOUD_ANTHROPIC_MODEL).ifEmpty { DEFAULT_ANTHROPIC_MODEL },
                 )
                 CleanupEngine.GithubCopilot -> {
                     val session = ensureCopilotSession()
@@ -56,15 +59,22 @@ class LlmTranscriptCleaner(private val context: Context) {
         }
     }
 
+    @Synchronized
     private fun ensureCopilotSession(): CopilotAuthService.SessionToken {
+        // Re-read the OAuth token every time so signing out (or into another
+        // account) in settings takes effect on the next dictation.
+        val oauth = secrets.get(SettingsKeys.CLOUD_COPILOT_OAUTH)
+            ?.takeIf { it.isNotEmpty() }
+            ?: throw CleanupHttpException("Sign in to GitHub Copilot in NeelSpeak settings.")
         val cached = copilotSession
-        if (cached != null && System.currentTimeMillis() < cached.expiresAtMillis - 60_000L) {
+        if (cached != null && copilotSessionOwner == oauth &&
+            System.currentTimeMillis() < cached.expiresAtMillis - 60_000L
+        ) {
             return cached
         }
-        val oauth = secrets.get(SettingsKeys.CLOUD_COPILOT_OAUTH)
-            ?: throw CleanupHttpException("Sign in to GitHub Copilot in NeelSpeak settings.")
         val fresh = CopilotAuthService.fetchSessionToken(oauth)
         copilotSession = fresh
+        copilotSessionOwner = oauth
         return fresh
     }
 
@@ -83,5 +93,30 @@ class LlmTranscriptCleaner(private val context: Context) {
     fun copilotFetchModels(): List<String> {
         val session = ensureCopilotSession()
         return copilot.fetchModels(session.token)
+    }
+
+    companion object {
+        const val DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
+
+        private val tokenLike = Regex(
+            """\b(?:sk-ant-|sk-or-|sk-|gsk_|ghu_|gho_|ghp_|ghs_|github_pat_|hf_|tid=)[A-Za-z0-9_\-*.;:=]{6,}"""
+        )
+
+        /** Short, user-facing reason for a cleanup failure, with anything
+         *  that looks like a credential masked so it can be shown and stored. */
+        fun describeFailure(t: Throwable): String {
+            val message = when (t) {
+                is java.net.UnknownHostException -> "No internet connection."
+                is java.net.SocketTimeoutException, is java.io.InterruptedIOException ->
+                    "The provider took too long to respond."
+                is java.net.ConnectException -> "Couldn't connect to the cleanup server."
+                is CopilotAuthService.AuthException ->
+                    "GitHub Copilot sign-in failed. Sign in again in NeelSpeak settings."
+                else -> t.message ?: t.javaClass.simpleName
+            }
+            return redact(message).take(240)
+        }
+
+        fun redact(text: String): String = text.replace(tokenLike, "[redacted]")
     }
 }
